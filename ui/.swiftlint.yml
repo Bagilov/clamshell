@@ -1,0 +1,28 @@
+excluded:
+  - .build
+  - build
+
+disabled_rules:
+  - trailing_comma
+  - todo
+
+opt_in_rules:
+  - empty_count
+  - explicit_init
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+  - redundant_nil_coalescing
+  - sorted_imports
+
+line_length:
+  warning: 100
+  error: 120
+  ignores_comments: true
+
+identifier_name:
+  min_length: 2
+  excluded:
+    - id
+
+type_name:
+  min_length: 3

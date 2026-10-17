@@ -1,0 +1,12 @@
+[tool.ruff]
+target-version = "py39"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "PL", "RUF", "EXE"]
+
+[tool.ruff.lint.per-file-ignores]
+"test_*.py" = ["EXE001"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]

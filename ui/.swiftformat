@@ -1,0 +1,5 @@
+--indent 4
+--swiftversion 5.9
+--disable trailingCommas
+--enable blankLinesAtStartOfScope
+--enable blankLinesAtEndOfScope

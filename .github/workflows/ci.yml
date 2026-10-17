@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    name: Python lint and tests
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - name: Install tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ruff pytest
+      - name: Ruff check
+        run: ruff check .
+      - name: Ruff format check
+        run: ruff format --check .
+      - name: Tests
+        run: python -m pytest -q
+      - name: Timer helper tests
+        run: bash clamshell_timer_test.sh
+      - name: Shellcheck
+        run: |
+          brew install shellcheck
+          shellcheck clamshell_helper.sh clamshell_timer.sh clamshell_timer_test.sh ui/build.sh
+
+  swift:
+    name: Swift lint, build and tests
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install linters
+        run: brew install swiftlint swiftformat
+      - name: Format check
+        working-directory: ui
+        run: swiftformat --lint .
+      - name: Lint
+        working-directory: ui
+        run: swiftlint --strict
+      - name: Tests
+        working-directory: ui
+        run: swift test
