@@ -92,7 +92,6 @@ def test_write_state_supports_floor_without_deadline(
     state = core.read_state()
     assert state.deadline is None
     assert state.floor == FLOOR
-    assert state.is_active is True
 
 
 def test_write_state_none_removes_file(
@@ -118,6 +117,22 @@ def test_read_state_tolerates_corrupt_file(
 ) -> None:
     state = tmp_path / "state.plist"
     state.write_bytes(b"not a plist")
+    monkeypatch.setattr(core, "STATE_PATH", state)
+    assert core.read_state() == core.TimerState(deadline=None, floor=0)
+
+
+@pytest.mark.parametrize("payload", [[1, 2, 3], "a string", 42])
+def test_read_state_tolerates_non_dict_plist(
+    payload: object, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A valid plist that is not a dict must not crash the CLI.
+
+    ``clamshell status`` reads this file, so an unexpected shape would
+    otherwise take down the whole command instead of degrading gracefully.
+    """
+    state = tmp_path / "state.plist"
+    with state.open("wb") as handle:
+        plistlib.dump(payload, handle)
     monkeypatch.setattr(core, "STATE_PATH", state)
     assert core.read_state() == core.TimerState(deadline=None, floor=0)
 
@@ -169,6 +184,62 @@ def test_run_raises_on_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
         core.run(["false"])
 
 
+def test_run_falls_back_to_stdout_for_error_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When stderr is empty the failure detail must come from stdout."""
+
+    class Completed:
+        returncode = 1
+        stdout = "from stdout"
+        stderr = ""
+
+    monkeypatch.setattr(core.subprocess, "run", lambda *a, **k: Completed())
+    with pytest.raises(core.ClamshellError, match="from stdout"):
+        core.run(["false"])
+
+
+def test_run_uses_unknown_error_when_both_streams_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Completed:
+        returncode = 1
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(core.subprocess, "run", lambda *a, **k: Completed())
+    with pytest.raises(core.ClamshellError, match="unknown error"):
+        core.run(["false"])
+
+
+def test_run_does_not_raise_when_check_is_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Completed:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    monkeypatch.setattr(core.subprocess, "run", lambda *a, **k: Completed())
+    result = core.run(["false"], check=False)
+    assert result.returncode == 1
+
+
+def test_require_macos_rejects_other_platforms(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(core.sys, "platform", "linux")
+    with pytest.raises(core.ClamshellError, match="macOS"):
+        core.require_macos()
+
+
+def test_require_macos_rejects_missing_pmset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(core.sys, "platform", "darwin")
+    monkeypatch.setattr(core, "PMSET", tmp_path / "absent-pmset")
+    with pytest.raises(core.ClamshellError, match="pmset"):
+        core.require_macos()
+
+
 def test_helper_toggle_maps_to_helper_actions(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(core, "run", lambda argv, **k: calls.append(list(argv)))
@@ -178,6 +249,21 @@ def test_helper_toggle_maps_to_helper_actions(monkeypatch: pytest.MonkeyPatch) -
         ["sudo", "-n", str(core.HELPER_PATH), "on"],
         ["sudo", "-n", str(core.HELPER_PATH), "off"],
     ]
+
+
+def test_sleep_display_calls_displaysleepnow(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(core, "run", lambda argv, **k: calls.append(list(argv)))
+    core.sleep_display()
+    assert calls == [[str(core.PMSET), "displaysleepnow"]]
+
+
+def test_sleep_display_needs_no_privileges(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Displaysleepnow runs as the user, so no sudo must appear in the call."""
+    calls: list[list[str]] = []
+    monkeypatch.setattr(core, "run", lambda argv, **k: calls.append(list(argv)))
+    core.sleep_display()
+    assert "sudo" not in calls[0]
 
 
 def test_cancel_timer_removes_job_and_clears_state(

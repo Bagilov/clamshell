@@ -165,3 +165,35 @@ def test_uninstall_restores_sleep_without_helper() -> None:
 
 def test_uninstall_removes_helper_log() -> None:
     assert "/var/log/clamshell-helper.log" in privileged.uninstall_command()
+
+
+def test_install_privileged_writes_helper_launcher_and_rule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One admin call must install the helper, the launcher and the rule."""
+    source = make_source(tmp_path)
+    support = tmp_path / "support"
+    monkeypatch.setattr(privileged, "SUPPORT_DIR", support)
+    monkeypatch.setattr(privileged, "CLI_PATH", tmp_path / "bin" / "clamshell")
+    monkeypatch.setattr(privileged, "SUDOERS_PATH", tmp_path / "sudoers")
+    scripts: list[str] = []
+    monkeypatch.setattr(privileged, "admin_shell", scripts.append)
+
+    privileged.install_privileged(
+        source / core.HELPER_NAME, "user ALL=(root) NOPASSWD: x"
+    )
+
+    assert len(scripts) == 1
+    script = scripts[0]
+    assert "/usr/local/sbin/clamshell-helper" in script
+    assert "base64 -d" in script
+    assert "visudo -cf" in script
+    assert str(tmp_path / "sudoers") in script
+
+
+def test_install_privileged_raises_for_missing_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(privileged, "SUPPORT_DIR", tmp_path / "support")
+    with pytest.raises(core.ClamshellError, match="missing"):
+        privileged.install_privileged(tmp_path / "absent.sh", "rule")

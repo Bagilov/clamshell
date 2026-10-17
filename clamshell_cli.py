@@ -4,7 +4,8 @@
 Commands:
     install                     Install helper, sudoers rule and CLI.
     uninstall                   Remove helper, sudoers rule and CLI.
-    on [--for SPAN] [--battery] Disable sleep, with optional auto-restore.
+    on [--for SPAN] [--battery] [--darken]
+                                Disable sleep, with optional auto-restore.
     off                         Restore normal sleep behaviour.
     status                      Show the current state and pending triggers.
     battery                     Show battery level and the configured floor.
@@ -38,6 +39,7 @@ from clamshell_core import (
     require_macos,
     schedule_auto_off,
     sleep_disabled,
+    sleep_display,
 )
 from clamshell_privileged import (
     admin_shell,
@@ -60,15 +62,18 @@ def cmd_on(args: argparse.Namespace) -> int:
         helper_toggle(True)
         cancel_timer()
         print("Sleep disabled. The lid can be closed now; run 'clamshell off' to stop.")
-        return 0
-    helper_toggle(True)
-    schedule_auto_off(seconds, floor)
-    triggers = []
-    if seconds is not None:
-        triggers.append(f"auto-restore in {format_span(seconds)}")
-    if floor > 0:
-        triggers.append(f"auto-restore at {floor}% battery")
-    print("Sleep disabled. " + ", ".join(triggers).capitalize() + ".")
+    else:
+        helper_toggle(True)
+        schedule_auto_off(seconds, floor)
+        triggers = []
+        if seconds is not None:
+            triggers.append(f"auto-restore in {format_span(seconds)}")
+        if floor > 0:
+            triggers.append(f"auto-restore at {floor}% battery")
+        print("Sleep disabled. " + ", ".join(triggers).capitalize() + ".")
+    if args.darken:
+        sleep_display()
+        print("Display turned off.")
     return 0
 
 
@@ -160,6 +165,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         metavar="PERCENT",
         help=f"auto-restore sleep at this battery level ({MIN_PERCENT}-{MAX_PERCENT})",
+    )
+    on.add_argument(
+        "--darken",
+        action="store_true",
+        help="turn the display off immediately (useful when the lid stays open)",
     )
     on.set_defaults(func=cmd_on)
 

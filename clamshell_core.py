@@ -56,11 +56,6 @@ class TimerState:
     deadline: int | None
     floor: int
 
-    @property
-    def is_active(self) -> bool:
-        """Whether any automatic restore trigger is configured."""
-        return self.deadline is not None or self.floor > 0
-
 
 def parse_span(value: str) -> int:
     """Convert a human span like ``1h``, ``30m`` or ``1h30m`` to seconds.
@@ -184,6 +179,17 @@ def helper_toggle(enabled: bool) -> None:
     run(["sudo", "-n", str(HELPER_PATH), action])
 
 
+def sleep_display() -> None:
+    """Turn the display off immediately.
+
+    Closing the lid usually blanks the built-in panel on its own, but a few
+    Apple Silicon setups keep it lit. This makes the blanking explicit and does
+    not require root. It is opt-in because it would otherwise darken the screen
+    of a session started with the lid open.
+    """
+    run([str(PMSET), "displaysleepnow"])
+
+
 def write_state(deadline: int | None, floor: int = 0) -> None:
     """Persist the timer deadline and battery floor, or clear them.
 
@@ -217,6 +223,8 @@ def read_state() -> TimerState:
         with STATE_PATH.open("rb") as handle:
             payload = plistlib.load(handle)
     except (OSError, plistlib.InvalidFileException):
+        return TimerState(deadline=None, floor=0)
+    if not isinstance(payload, dict):
         return TimerState(deadline=None, floor=0)
     raw_deadline = payload.get("Deadline")
     raw_floor = payload.get("BatteryFloor")

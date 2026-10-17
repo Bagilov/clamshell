@@ -163,8 +163,41 @@ public struct ClamshellCommand: Sendable {
     /// - Parameters:
     ///   - duration: Time limit, or `.indefinite` for no time limit.
     ///   - floor: Battery level that stops the session, or `.off`.
-    public func enable(duration: DurationOption, floor: BatteryFloorOption = .off) throws {
-        try enable(span: duration.span, floor: floor)
+    ///   - darken: Whether to blank the display immediately.
+    public func enable(
+        duration: DurationOption,
+        floor: BatteryFloorOption = .off,
+        darken: Bool = false
+    ) throws {
+        try enable(span: duration.span, floor: floor, darken: darken)
+    }
+
+    /// Build the `clamshell on` argument list for the given options.
+    ///
+    /// Kept separate from `enable` so the argument mapping is unit-testable
+    /// without spawning the CLI.
+    ///
+    /// - Parameters:
+    ///   - span: CLI span such as `45m`, or `nil` for no time limit.
+    ///   - floor: Battery level that stops the session, or `.off`.
+    ///   - darken: Whether to blank the display immediately.
+    /// - Returns: The arguments to pass to the CLI, starting with `on`.
+    public static func startArguments(
+        span: String?,
+        floor: BatteryFloorOption,
+        darken: Bool
+    ) -> [String] {
+        var arguments = ["on"]
+        if let span {
+            arguments.append(contentsOf: ["--for", span])
+        }
+        if let percent = floor.percent {
+            arguments.append(contentsOf: ["--battery", String(percent)])
+        }
+        if darken {
+            arguments.append("--darken")
+        }
+        return arguments
     }
 
     /// Disable sleep using a raw CLI span, so a running session can be
@@ -173,14 +206,13 @@ public struct ClamshellCommand: Sendable {
     /// - Parameters:
     ///   - span: CLI span such as `45m`, or `nil` for no time limit.
     ///   - floor: Battery level that stops the session, or `.off`.
-    public func enable(span: String?, floor: BatteryFloorOption = .off) throws {
-        var arguments = ["on"]
-        if let span {
-            arguments.append(contentsOf: ["--for", span])
-        }
-        if let percent = floor.percent {
-            arguments.append(contentsOf: ["--battery", String(percent)])
-        }
+    ///   - darken: Whether to blank the display immediately.
+    public func enable(
+        span: String?,
+        floor: BatteryFloorOption = .off,
+        darken: Bool = false
+    ) throws {
+        let arguments = ClamshellCommand.startArguments(span: span, floor: floor, darken: darken)
         _ = try run(arguments)
     }
 

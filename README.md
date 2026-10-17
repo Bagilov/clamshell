@@ -57,6 +57,7 @@ clamshell on                    # disable sleep until you stop it
 clamshell on --for 1h           # disable sleep for one hour, then restore
 clamshell on --battery 20       # disable sleep until the battery hits 20%
 clamshell on --for 4h --battery 20   # whichever trigger fires first
+clamshell on --darken           # also blank the display now
 clamshell off                   # restore normal sleep behaviour
 clamshell status                # show state and pending triggers
 clamshell battery               # show battery level and the configured floor
@@ -72,7 +73,8 @@ ui/build.sh --install     # lint, test, build and copy to /Applications
 
 The app is an accessory (`LSUIElement`): a moon glyph in the menu bar, no Dock
 icon. Its menu offers the duration choices, a "Stop on Low Battery" section with
-the battery floor levels, "Stop Clamshell Mode", "Refresh" and "Quit".
+the battery floor levels, a "Turn Display Off" toggle, "Stop Clamshell Mode",
+"Refresh" and "Quit".
 
 While a timed session runs, the remaining time is shown next to the glyph in
 the menu bar (`3h52m`), ticking every second. It reads `∞` for an unlimited
@@ -94,8 +96,11 @@ not draining, so a low reading never cuts a session short.
 
 ## Notes
 
-- Closing the lid also disables the internal display; with no external display
-  the Mac runs headless until you open it again.
+- Closing the lid normally blanks the built-in display on its own; the machine
+  then runs headless until you open it again. If a setup keeps the panel lit,
+  `clamshell on --darken` blanks it explicitly with `pmset displaysleepnow`,
+  which needs no root. It is opt-in so a session started with the lid open is
+  not darkened unexpectedly.
 - Thermal limits still apply: sustained heavy load with the lid closed can
   throttle the CPU.
 - `clamshell uninstall` restores sleep even if the helper is already missing.

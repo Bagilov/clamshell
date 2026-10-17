@@ -13,7 +13,9 @@ from dataclasses import dataclass
 from clamshell_core import PMSET, ClamshellError, run
 
 POWER_SOURCE = re.compile(r"Now drawing from '([^']+)'")
-PERCENT = re.compile(r"(\d+)%")
+# pmset always renders the level as "<n>%; <state>", so anchoring on "%;" avoids
+# matching a stray percentage anywhere else in the output.
+PERCENT = re.compile(r"(\d+)%;")
 AC_SOURCE = "AC Power"
 MIN_PERCENT = 5
 MAX_PERCENT = 95

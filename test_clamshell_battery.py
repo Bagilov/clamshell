@@ -57,6 +57,28 @@ def test_battery_state_returns_none_on_unparseable_output(
     assert battery.battery_state() is None
 
 
+def test_battery_state_ignores_percent_outside_the_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A percentage elsewhere in the output must not be read as the level."""
+    text = (
+        "Now drawing from 'Battery Power'\n"
+        " -InternalBattery-0 (id=42%)\t77%; discharging present: true\n"
+    )
+    monkeypatch.setattr(battery, "run", lambda *a, **k: Result(text))
+    state = battery.battery_state()
+    assert state == battery.BatteryState(percent=77, on_battery=True)
+
+
+def test_battery_state_returns_none_when_level_lacks_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bare percentage with no "%;" marker is not a valid level line."""
+    text = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1) 55%\n"
+    monkeypatch.setattr(battery, "run", lambda *a, **k: Result(text))
+    assert battery.battery_state() is None
+
+
 @pytest.mark.parametrize("value", [5, 20, 50, 95])
 def test_validate_percent_accepts_supported_range(value: int) -> None:
     assert battery.validate_percent(value) == value

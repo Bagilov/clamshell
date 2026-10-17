@@ -6,7 +6,7 @@ import ClamshellCore
 /// All CLI interaction happens off the main thread; results are applied back on
 /// the main queue so AppKit state stays single-threaded.
 @MainActor
-final class MenuBarController: NSObject {
+final class MenuBarController: NSObject, MenuActions {
     private let command = ClamshellCommand()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private var refreshTimer: Timer?
@@ -15,12 +15,12 @@ final class MenuBarController: NSObject {
     private var deadline: Date?
     private var batteryFloor = BatteryFloorOption.off
     private var selectedDuration = DurationOption.indefinite
+    private var darkenDisplay = false
     private var lastError: Error?
     private var isWorking = false
     private var awaitingExpiryRefresh = false
 
-    private let stateItem = NSMenuItem()
-    private var floorItems: [NSMenuItem] = []
+    private var menuBuilder = MenuBuilder()
     private var activity: NSObjectProtocol?
     private var menuDelegate: MenuOpenObserver?
 
@@ -53,17 +53,12 @@ final class MenuBarController: NSObject {
     }
 
     private func buildMenu() {
-        let menu = NSMenu()
-
-        stateItem.isEnabled = false
-        menu.addItem(stateItem)
-        menu.addItem(.separator())
-        addSessionItems(to: menu)
-        menu.addItem(.separator())
-        addFloorItems(to: menu)
-        menu.addItem(.separator())
-        addCommandItems(to: menu)
-
+        let menu = menuBuilder.buildMenu(
+            target: self,
+            command: command,
+            floor: batteryFloor,
+            darken: darkenDisplay
+        )
         statusItem.menu = menu
         let observer = MenuOpenObserver { [weak self] in
             self?.refresh()
@@ -72,75 +67,7 @@ final class MenuBarController: NSObject {
         menu.delegate = observer
     }
 
-    /// Add the keep-awake choices, or a hint when the CLI is not installed.
-    private func addSessionItems(to menu: NSMenu) {
-        guard command.isInstalled else {
-            let missing = NSMenuItem(
-                title: "Run `clamshell install` first",
-                action: nil,
-                keyEquivalent: ""
-            )
-            missing.isEnabled = false
-            menu.addItem(missing)
-            return
-        }
-        for option in DurationOption.allCases {
-            let item = NSMenuItem(
-                title: option.title,
-                action: #selector(startSession(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = option
-            menu.addItem(item)
-        }
-    }
-
-    /// Add the battery-floor header and its radio-style choices.
-    private func addFloorItems(to menu: NSMenu) {
-        let header = NSMenuItem(title: "Stop on Low Battery", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
-        floorItems = BatteryFloorOption.allCases.map { option in
-            let item = NSMenuItem(
-                title: option.title,
-                action: #selector(selectFloor(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = option
-            item.state = option == batteryFloor ? .on : .off
-            menu.addItem(item)
-            return item
-        }
-    }
-
-    /// Add the stop, refresh and quit commands.
-    private func addCommandItems(to menu: NSMenu) {
-        let offItem = NSMenuItem(
-            title: "Stop Clamshell Mode",
-            action: #selector(stopSession),
-            keyEquivalent: ""
-        )
-        offItem.target = self
-        menu.addItem(offItem)
-
-        let refreshItem = NSMenuItem(
-            title: "Refresh",
-            action: #selector(refresh),
-            keyEquivalent: "r"
-        )
-        refreshItem.target = self
-        menu.addItem(refreshItem)
-
-        menu.addItem(.separator())
-
-        let quit = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
-        quit.target = self
-        menu.addItem(quit)
-    }
-
-    @objc private func refresh() {
+    @objc func refresh() {
         guard !isWorking else { return }
         Task { @MainActor in
             await refreshStatus()
@@ -148,16 +75,28 @@ final class MenuBarController: NSObject {
         }
     }
 
-    @objc private func startSession(_ sender: NSMenuItem) {
+    @objc func startSession(_ sender: NSMenuItem) {
         guard let option = sender.representedObject as? DurationOption else { return }
         selectedDuration = option
-        perform { try self.command.enable(duration: option, floor: self.batteryFloor) }
+        perform {
+            try self.command.enable(
+                duration: option,
+                floor: self.batteryFloor,
+                darken: self.darkenDisplay
+            )
+        }
     }
 
-    @objc private func selectFloor(_ sender: NSMenuItem) {
+    /// Toggle whether starting a session also blanks the display.
+    @objc func toggleDarken() {
+        darkenDisplay.toggle()
+        menuBuilder.darkenItem.state = darkenDisplay ? .on : .off
+    }
+
+    @objc func selectFloor(_ sender: NSMenuItem) {
         guard let option = sender.representedObject as? BatteryFloorOption else { return }
         batteryFloor = option
-        for item in floorItems {
+        for item in menuBuilder.floorItems {
             item.state = (item.representedObject as? BatteryFloorOption) == option ? .on : .off
         }
         guard status.isDisabled else { return }
@@ -167,11 +106,11 @@ final class MenuBarController: NSObject {
         perform { try self.command.enable(span: span, floor: option) }
     }
 
-    @objc private func stopSession() {
+    @objc func stopSession() {
         perform { try self.command.disable() }
     }
 
-    @objc private func quit() {
+    @objc func quit() {
         NSApplication.shared.terminate(nil)
     }
 
@@ -226,7 +165,7 @@ final class MenuBarController: NSObject {
         let option = BatteryFloorOption(rawValue: reported) ?? .off
         guard option != batteryFloor else { return }
         batteryFloor = option
-        for item in floorItems {
+        for item in menuBuilder.floorItems {
             item.state = (item.representedObject as? BatteryFloorOption) == option ? .on : .off
         }
     }
@@ -241,10 +180,7 @@ final class MenuBarController: NSObject {
     }
 
     private func renderBusy() {
-        stateItem.title = "Working…"
-        statusItem.button?.image = Symbol.icon(named: "hourglass")
-        statusItem.button?.title = ""
-        statusItem.button?.toolTip = "Clamshell: working…"
+        apply(.busy)
     }
 
     /// Remaining seconds derived from the local deadline, if one is set.
@@ -255,31 +191,20 @@ final class MenuBarController: NSObject {
     }
 
     private func render() {
-        if let error = lastError {
-            stateItem.title = "Error: \(error.localizedDescription)"
-            statusItem.button?.image = Symbol.icon(named: "exclamationmark.triangle")
-            statusItem.button?.title = ""
-            statusItem.button?.toolTip = "Clamshell: \(error.localizedDescription)"
-            return
-        }
         resolveLocalExpiry()
-        let icon = status.isDisabled ? "moon.zzz.fill" : "moon.zzz"
-        statusItem.button?.image = Symbol.icon(named: icon)
-        let floorText = status.batteryFloor.map { " · stops at \($0)%" } ?? ""
-        if let remaining = remainingSeconds, remaining > 0 {
-            let full = DurationFormat.text(fromSeconds: remaining)
-            stateItem.title = "Active, auto-restores in \(full)\(floorText)"
-            statusItem.button?.title = " \(DurationFormat.compact(fromSeconds: remaining))"
-            statusItem.button?.toolTip = "Clamshell: auto-restores in \(full)\(floorText)"
-        } else if status.isDisabled {
-            stateItem.title = "Active until stopped\(floorText)"
-            statusItem.button?.title = status.batteryFloor == nil ? " ∞" : " 🔋"
-            statusItem.button?.toolTip = "Clamshell: active until stopped\(floorText)"
-        } else {
-            stateItem.title = "Sleep is enabled"
-            statusItem.button?.title = ""
-            statusItem.button?.toolTip = "Clamshell: sleep is enabled"
-        }
+        apply(MenuBarPresentation.make(
+            status: status,
+            remainingSeconds: remainingSeconds,
+            error: lastError
+        ))
+    }
+
+    /// Apply a presentation to the status item and the disabled menu row.
+    private func apply(_ presentation: MenuBarPresentation) {
+        menuBuilder.stateItem.title = presentation.menuTitle
+        statusItem.button?.image = Symbol.icon(named: presentation.iconName)
+        statusItem.button?.title = presentation.buttonTitle
+        statusItem.button?.toolTip = presentation.toolTip
     }
 
     /// Apply the deadline locally once it passes, so the menu bar never shows a

@@ -17,9 +17,4 @@ public struct ClamshellStatus: Equatable, Sendable {
 
     /// A status representing sleep being allowed with no pending trigger.
     public static let idle = ClamshellStatus(isDisabled: false, remainingSeconds: nil)
-
-    /// Whether any automatic restore trigger is configured.
-    public var hasTrigger: Bool {
-        remainingSeconds != nil || batteryFloor != nil
-    }
 }
