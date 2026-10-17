@@ -19,7 +19,8 @@ Python:
 ruff check .
 ruff format --check .
 python -m pytest -q
-shellcheck clamshell_helper.sh clamshell_timer.sh ui/build.sh
+bash clamshell_timer_test.sh
+shellcheck clamshell_helper.sh clamshell_timer.sh clamshell_timer_test.sh ui/build.sh
 ```
 
 Swift, from `ui/`:

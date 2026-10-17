@@ -2,11 +2,12 @@
 """Command-line interface for clamshell mode on Apple Silicon Macs.
 
 Commands:
-    install           Install helper, sudoers rule and CLI (one admin prompt).
-    uninstall         Remove helper, sudoers rule and timer.
-    on [--for SPAN]   Disable sleep; optionally auto-restore after SPAN.
-    off               Restore normal sleep behaviour.
-    status            Show the current state and any remaining timer.
+    install                     Install helper, sudoers rule and CLI.
+    uninstall                   Remove helper, sudoers rule and CLI.
+    on [--for SPAN] [--battery] Disable sleep, with optional auto-restore.
+    off                         Restore normal sleep behaviour.
+    status                      Show the current state and pending triggers.
+    battery                     Show battery level and the configured floor.
 """
 
 from __future__ import annotations

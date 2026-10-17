@@ -44,7 +44,7 @@ One GUI admin prompt installs:
 | `/etc/sudoers.d/clamshell` | `NOPASSWD` rule scoped to that helper only |
 | `/usr/local/bin/clamshell` | Launcher on `PATH` |
 
-The Python sources, the helper and a second launcher are also copied to
+The Python sources, both shell scripts and a second launcher are also copied to
 `~/Library/Application Support/clamshell/`. That directory needs no privileges
 and stays readable by the sandboxed menu bar app, which cannot read protected
 folders such as `~/Documents`. Because the helper is copied there too,
@@ -71,8 +71,8 @@ ui/build.sh --install     # lint, test, build and copy to /Applications
 ```
 
 The app is an accessory (`LSUIElement`): a moon glyph in the menu bar, no Dock
-icon. Its menu offers the duration choices, a "Stop on Low Battery" submenu for
-the battery floor, "Stop Clamshell Mode", "Refresh" and "Quit".
+icon. Its menu offers the duration choices, a "Stop on Low Battery" section with
+the battery floor levels, "Stop Clamshell Mode", "Refresh" and "Quit".
 
 While a timed session runs, the remaining time is shown next to the glyph in
 the menu bar (`3h52m`), ticking every second. It reads `∞` for an unlimited
@@ -112,12 +112,13 @@ the support directory, and restores normal sleep behaviour.
 
 ## Development
 
-Python:
+Python and shell:
 
 ```bash
 ruff check . && ruff format --check .
 python -m pytest -q
-shellcheck clamshell_helper.sh clamshell_timer.sh
+bash clamshell_timer_test.sh
+shellcheck clamshell_helper.sh clamshell_timer.sh clamshell_timer_test.sh
 ```
 
 Swift (`ui/`):
