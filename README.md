@@ -3,13 +3,17 @@
 Keep a MacBook awake with the lid closed on Apple Silicon, from the command
 line or a menu bar app.
 
+This is the feature macOS calls **clamshell mode** or **closed-display mode**:
+it keeps the Mac awake and prevents sleep when the lid shuts, instead of
+suspending to disk.
+
 **Status: pre-release (0.1.0).** The core behaviour is usable, but the command
 interface is not yet frozen while the major version is `0`.
 
 macOS sleeps as soon as the lid closes unless sleep is explicitly disabled.
-On Apple Silicon, `caffeinate` and ordinary keep-awake menu bar apps (for
-example KeepingYouAwake) cannot override that: the only working switch is
-`pmset disablesleep`, which needs root.
+On Apple Silicon (M1, M2, M3, M4 and later), `caffeinate` and ordinary
+keep-awake menu bar apps (for example KeepingYouAwake) cannot override that:
+the only working switch is `pmset disablesleep`, which needs root.
 
 This project wraps that single privileged call in a tiny root-owned helper with
 a narrow `NOPASSWD` sudoers rule, so day-to-day use never asks for a password
