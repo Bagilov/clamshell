@@ -3,6 +3,9 @@
 Keep a MacBook awake with the lid closed on Apple Silicon, from the command
 line or a menu bar app.
 
+**Status: pre-release (0.1.0).** The core behaviour is usable, but the command
+interface is not yet frozen while the major version is `0`.
+
 macOS sleeps as soon as the lid closes unless sleep is explicitly disabled.
 On Apple Silicon, `caffeinate` and ordinary keep-awake menu bar apps (for
 example KeepingYouAwake) cannot override that: the only working switch is
@@ -26,23 +29,36 @@ and no general root access is granted.
 
 ## Requirements
 
-- macOS on Apple Silicon
+- macOS 14 or newer on Apple Silicon
 - Python 3.9 or newer
 - For the menu bar app: a Swift toolchain (Command Line Tools are enough)
 
-## Install the CLI
+## Install
+
+### From the package (recommended)
+
+Download `Clamshell-<version>.pkg` from the
+[latest release](https://github.com/Bagilov/clamshell/releases/latest), open it
+and follow the installer. It needs one administrator password, then installs:
+
+| Path | Purpose |
+|---|---|
+| `/Applications/Clamshell.app` | Menu bar app |
+| `/usr/local/lib/clamshell/` | CLI sources and watcher |
+| `/usr/local/sbin/clamshell-helper` | Root-owned helper; accepts only `on` / `off` |
+| `/etc/sudoers.d/clamshell` | `NOPASSWD` rule scoped to that helper only |
+| `/usr/local/bin/clamshell` | Launcher on `PATH` |
+
+The package is not notarised, so the first launch may need
+**System Settings → Privacy & Security → Open Anyway**.
+
+### From a clone
 
 ```bash
 python3 clamshell_cli.py install
 ```
 
-One GUI admin prompt installs:
-
-| Path | Purpose |
-|---|---|
-| `/usr/local/sbin/clamshell-helper` | Root-owned helper; accepts only `on` / `off` |
-| `/etc/sudoers.d/clamshell` | `NOPASSWD` rule scoped to that helper only |
-| `/usr/local/bin/clamshell` | Launcher on `PATH` |
+One GUI admin prompt installs the same helper, sudoers rule and `PATH` launcher.
 
 The Python sources, both shell scripts and a second launcher are also copied to
 `~/Library/Application Support/clamshell/`. That directory needs no privileges
@@ -71,10 +87,19 @@ Duration spans accept `s`, `m`, `h`, `d` and combinations: `45m`, `2h`, `1h30m`.
 ui/build.sh --install     # lint, test, build and copy to /Applications
 ```
 
+Packaging a distributable installer:
+
+```bash
+./package.sh              # writes build/Clamshell-<version>.pkg
+```
+
+The shipped binary is built with a neutral scratch path and
+`-debug-prefix-map`, so it never embeds the builder's home directory.
+
 The app is an accessory (`LSUIElement`): a moon glyph in the menu bar, no Dock
 icon. Its menu offers the duration choices, a "Stop on Low Battery" section with
 the battery floor levels, a "Turn Display Off" toggle, "Stop Clamshell Mode",
-"Refresh" and "Quit".
+"Refresh", "About Clamshell" with the repository link, and "Quit".
 
 While a timed session runs, the remaining time is shown next to the glyph in
 the menu bar (`3h52m`), ticking every second. It reads `∞` for an unlimited

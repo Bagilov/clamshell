@@ -22,19 +22,30 @@ from pathlib import Path
 
 HELPER_PATH = Path("/usr/local/sbin/clamshell-helper")
 CLI_PATH = Path("/usr/local/bin/clamshell")
+#: Where a user-run `clamshell install` stages its sources and launcher. A
+#: packaged install instead uses :data:`LIB_DIR`.
 SUPPORT_DIR = Path.home() / "Library/Application Support/clamshell"
+#: System-wide location used by the macOS installer package.
+LIB_DIR = Path("/usr/local/lib/clamshell")
 SUDOERS_PATH = Path("/etc/sudoers.d/clamshell")
 TIMER_LABEL = "io.github.bagilov.clamshell.timer"
 LEGACY_TIMER_LABELS = ("com.alfagen.clamshell.timer",)
 STATE_PATH = SUPPORT_DIR / "state.plist"
 MODULE_DIR = Path(__file__).resolve().parent
+INFO_PLIST = MODULE_DIR / "ui" / "Resources" / "Info.plist"
 HELPER_NAME = "clamshell_helper.sh"
 TIMER_NAME = "clamshell_timer.sh"
 MODULE_GLOB = "clamshell_*.py"
-TIMER_SCRIPT = SUPPORT_DIR / TIMER_NAME
+# The watcher sits beside whichever copy of the code is running, so the repo, a
+# user install and a packaged install all resolve it correctly.
+TIMER_SCRIPT = MODULE_DIR / TIMER_NAME
 PMSET = Path("/usr/bin/pmset")
 DEFAULT_TIMEOUT = 60.0
 FAR_FUTURE = 4_102_444_800
+
+#: Project version, following semantic versioning. Major zero marks the current
+#: pre-release line: the interface may still change between minor releases.
+VERSION = "0.1.0"
 
 _SPAN_RE = re.compile(r"(\d+)([smhd])")
 _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}

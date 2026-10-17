@@ -14,9 +14,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import clamshell_cli as cli
 import clamshell_core as core
 
 DEADLINE = 1234
+SEMVER_PARTS = 3
 FLOOR = 25
 
 
@@ -347,13 +349,35 @@ def test_schedule_auto_off_requires_a_trigger() -> None:
         core.schedule_auto_off(None, 0)
 
 
-def test_timer_script_path_matches_installed_name() -> None:
-    """The watcher path must match what install_sources writes.
+def test_version_follows_semver() -> None:
+    """The project version must stay valid semantic versioning."""
+    parts = core.VERSION.split(".")
+    assert len(parts) == SEMVER_PARTS
+    assert all(part.isdigit() for part in parts)
+    assert int(parts[0]) == 0, "major zero marks the pre-release line"
 
-    A mismatch here silently breaks every scheduled restore, because the
-    launchd job would exec a file that does not exist.
+
+def test_bundle_version_matches_the_code_version() -> None:
+    """The app bundle version must not drift from the code version."""
+    text = core.INFO_PLIST.read_text()
+    assert f"<string>{core.VERSION}</string>" in text
+
+
+def test_cli_exposes_the_version_flag() -> None:
+    """`clamshell --version` must print the version and exit cleanly."""
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit) as exit_info:
+        parser.parse_args(["--version"])
+    assert exit_info.value.code == 0
+
+
+def test_timer_script_sits_beside_the_running_code() -> None:
+    """The watcher resolves next to the running module.
+
+    That makes the repo, a user install and a packaged install all work without
+    rewiring the path, and a mismatch would silently break every restore.
     """
-    assert core.TIMER_SCRIPT == core.SUPPORT_DIR / core.TIMER_NAME
+    assert core.TIMER_SCRIPT == core.MODULE_DIR / core.TIMER_NAME
     assert core.TIMER_SCRIPT.name == core.TIMER_NAME
 
 

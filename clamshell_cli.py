@@ -30,6 +30,7 @@ from clamshell_core import (
     MODULE_DIR,
     SUDOERS_PATH,
     SUPPORT_DIR,
+    VERSION,
     ClamshellError,
     cancel_timer,
     format_span,
@@ -125,14 +126,36 @@ def cmd_status(_: argparse.Namespace) -> int:
 
 
 def cmd_install(_: argparse.Namespace) -> int:
-    """Install the helper, CLI sources, launcher and sudoers rule."""
+    """Install the helper, CLI sources, launcher and sudoers rule.
+
+    The helper source sits beside the modules in a checkout, but a package
+    install puts the executable in ``HELPER_PATH`` and keeps only the modules
+    under the library directory. Both layouts are accepted so `install` still
+    works after a package install.
+    """
     require_macos()
-    helper_src = MODULE_DIR / HELPER_NAME
+    helper_src = helper_source()
     rule = f"{current_user()} ALL=(root) NOPASSWD: {HELPER_PATH}"
     install_privileged(helper_src, rule)
     print(f"Installed helper at {HELPER_PATH} and rule at {SUDOERS_PATH}.")
     print(f"CLI available as {CLI_PATH}. Try: clamshell on --for 1h")
     return 0
+
+
+def helper_source() -> Path:
+    """Locate the helper script from either install layout.
+
+    Returns:
+        The checkout copy when present, otherwise the installed executable.
+
+    Raises:
+        ClamshellError: If neither candidate exists.
+    """
+    candidates = (MODULE_DIR / HELPER_NAME, HELPER_PATH)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise ClamshellError(f"missing helper script (looked in {MODULE_DIR})")
 
 
 def cmd_uninstall(_: argparse.Namespace) -> int:
@@ -149,6 +172,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="clamshell",
         description="Keep this MacBook awake with the lid closed.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {VERSION}",
     )
     sub = parser.add_subparsers(dest="command")
 

@@ -121,6 +121,24 @@ struct MenuBuilder {
 
         menu.addItem(.separator())
 
+        let about = NSMenuItem(
+            title: "About Clamshell",
+            action: #selector(MenuActions.showAbout),
+            keyEquivalent: ""
+        )
+        about.target = target
+        menu.addItem(about)
+
+        let repository = NSMenuItem(
+            title: "View Repository",
+            action: #selector(MenuActions.openRepository),
+            keyEquivalent: ""
+        )
+        repository.target = target
+        menu.addItem(repository)
+
+        menu.addItem(.separator())
+
         let quit = NSMenuItem(
             title: "Quit",
             action: #selector(MenuActions.quit),
@@ -140,5 +158,7 @@ protocol MenuActions {
     func toggleDarken()
     func stopSession()
     func refresh()
+    func showAbout()
+    func openRepository()
     func quit()
 }

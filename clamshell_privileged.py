@@ -22,6 +22,7 @@ from pathlib import Path
 from clamshell_core import (
     CLI_PATH,
     HELPER_NAME,
+    LIB_DIR,
     MODULE_GLOB,
     SUDOERS_PATH,
     SUPPORT_DIR,
@@ -225,5 +226,6 @@ def uninstall_command() -> str:
     return (
         "pmset disablesleep 0 >/dev/null 2>&1 || true; "
         f"rm -f /usr/local/sbin/clamshell-helper {SUDOERS_PATH} {CLI_PATH}; "
+        f"rm -rf {LIB_DIR}; "
         f"rm -f /var/log/clamshell-helper.log"
     )

@@ -9,6 +9,7 @@ venv/
 
 ui/.build/
 ui/build/
+build/
 *.dSYM/
 
 .DS_Store

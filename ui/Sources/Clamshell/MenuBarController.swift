@@ -110,6 +110,24 @@ final class MenuBarController: NSObject, MenuActions {
         perform { try self.command.disable() }
     }
 
+    @objc func showAbout() {
+        // Activate first so the panel comes to the front from an accessory app,
+        // which otherwise has no windows and can stay behind the active app.
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        NSApplication.shared.orderFrontStandardAboutPanel(options: [
+            .applicationName: About.name,
+            .applicationVersion: About.version,
+            .version: "",
+            .credits: NSAttributedString(
+                string: "\(About.summary)\n\(About.repositoryURL.absoluteString)"
+            ),
+        ])
+    }
+
+    @objc func openRepository() {
+        NSWorkspace.shared.open(About.repositoryURL)
+    }
+
     @objc func quit() {
         NSApplication.shared.terminate(nil)
     }

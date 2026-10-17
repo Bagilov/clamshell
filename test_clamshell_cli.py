@@ -160,8 +160,47 @@ def test_uninstall_removes_support_directory(
     support.mkdir()
     (support / "clamshell_cli.py").write_text("# x\n")
     scripts: list[str] = []
+    # STATE_PATH must be redirected too: uninstall cancels the timer, and an
+    # unpatched path would delete the real user state file.
+    monkeypatch.setattr(core, "STATE_PATH", tmp_path / "state.plist")
     monkeypatch.setattr(cli, "SUPPORT_DIR", support)
     monkeypatch.setattr(cli, "admin_shell", scripts.append)
     assert cli.main(["uninstall"]) == 0
     assert not support.exists()
     assert any("pmset disablesleep 0" in s for s in scripts)
+
+
+def test_helper_source_prefers_the_checkout_copy(tmp_path: Path, monkeypatch) -> None:
+    """A checkout keeps the helper beside the modules."""
+    module_dir = tmp_path / "repo"
+    module_dir.mkdir()
+    (module_dir / core.HELPER_NAME).write_text("#!/bin/bash\n")
+    monkeypatch.setattr(cli, "MODULE_DIR", module_dir)
+    monkeypatch.setattr(cli, "HELPER_PATH", tmp_path / "sbin" / "clamshell-helper")
+    assert cli.helper_source() == module_dir / core.HELPER_NAME
+
+
+def test_helper_source_falls_back_to_the_installed_helper(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A package install keeps only the executable, so fall back to it.
+
+    Without this, `clamshell install` would fail after a package install.
+    """
+    module_dir = tmp_path / "lib"
+    module_dir.mkdir()
+    installed = tmp_path / "sbin" / "clamshell-helper"
+    installed.parent.mkdir()
+    installed.write_text("#!/bin/bash\n")
+    monkeypatch.setattr(cli, "MODULE_DIR", module_dir)
+    monkeypatch.setattr(cli, "HELPER_PATH", installed)
+    assert cli.helper_source() == installed
+
+
+def test_helper_source_raises_when_nothing_exists(tmp_path: Path, monkeypatch) -> None:
+    module_dir = tmp_path / "lib"
+    module_dir.mkdir()
+    monkeypatch.setattr(cli, "MODULE_DIR", module_dir)
+    monkeypatch.setattr(cli, "HELPER_PATH", tmp_path / "absent")
+    with pytest.raises(core.ClamshellError):
+        cli.helper_source()

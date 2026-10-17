@@ -32,8 +32,21 @@ step "Running lint and tests"
 (cd "$UI_DIR" && swift test ${TEST_PLUGIN_ARGS[@]+"${TEST_PLUGIN_ARGS[@]}"})
 
 step "Building release binary"
-(cd "$UI_DIR" && swift build -c release --product "$APP_NAME")
-BINARY="$(cd "$UI_DIR" && swift build -c release --show-bin-path)/$APP_NAME"
+# Shipped binaries must not embed the builder's absolute paths, which would leak
+# a user name and directory layout through Swift reflection metadata. Two things
+# are needed, because the path is recorded twice:
+#   * a scratch path outside the checkout, so the build directory carries no
+#     user-identifying path of its own
+#   * -debug-prefix-map entries for the source root and the scratch path
+# Both keys are resolved with pwd -P so they match the compiler's own view.
+SOURCE_ROOT="$(cd "$UI_DIR/.." && pwd -P)"
+SCRATCH="${TMPDIR:-/tmp}/clamshell-build.$$"
+trap 'rm -rf "$SCRATCH"' EXIT
+(cd "$UI_DIR" && swift build -c release --product "$APP_NAME" --scratch-path "$SCRATCH" \
+    -Xswiftc -debug-prefix-map -Xswiftc "$SOURCE_ROOT=/build" \
+    -Xswiftc -debug-prefix-map -Xswiftc "$SCRATCH=/build")
+BINARY="$(cd "$UI_DIR" && swift build -c release --product "$APP_NAME" \
+    --scratch-path "$SCRATCH" --show-bin-path)/$APP_NAME"
 
 step "Assembling $APP_NAME.app"
 rm -rf "$APP_BUNDLE"
