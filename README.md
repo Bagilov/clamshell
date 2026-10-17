@@ -38,8 +38,8 @@ and no general root access is granted.
 ### From the package (recommended)
 
 Download `Clamshell-<version>.pkg` from the
-[latest release](https://github.com/Bagilov/clamshell/releases/latest), open it
-and follow the installer. It needs one administrator password, then installs:
+[releases page](https://github.com/Bagilov/clamshell/releases), open it and
+follow the installer. It needs one administrator password, then installs:
 
 | Path | Purpose |
 |---|---|
