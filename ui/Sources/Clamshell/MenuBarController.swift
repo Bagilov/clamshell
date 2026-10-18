@@ -28,10 +28,10 @@ final class MenuBarController: NSObject, MenuActions {
         buildMenu()
         render()
         refresh()
-        // App Nap throttles timers in a background accessory app, so opt out
-        // of napping. This does not itself prevent system sleep.
+        // App Nap throttles timers in a background accessory app, so opt out of
+        // napping via AppNapPolicy, which deliberately does not block sleep.
         activity = ProcessInfo.processInfo.beginActivity(
-            options: .userInitiated,
+            options: AppNapPolicy.activityOptions,
             reason: "Refresh clamshell status countdown"
         )
         // The CLI is queried every 5s, but the displayed countdown ticks every

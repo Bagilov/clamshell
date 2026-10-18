@@ -10,6 +10,16 @@ releases, and breaking changes are noted explicitly.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-18
+
+### Fixed
+
+- The menu bar app no longer prevents the Mac from sleeping. It opted out of
+  App Nap with `.userInitiated`, which also sets the `idleSystemSleepDisabled`
+  bit, so the app held a power assertion for as long as it ran. After a timed
+  session expired the Mac stayed awake instead of sleeping. The policy now uses
+  `.userInitiatedAllowingIdleSystemSleep` and is covered by tests.
+
 ## [0.1.0] - 2026-10-17
 
 First pre-release. The core behaviour is usable, but the command interface is
@@ -33,5 +43,6 @@ not yet frozen.
   display toggle and surfaced CLI errors.
 - `--version`, and bundle/version consistency checks.
 
-[Unreleased]: https://github.com/Bagilov/clamshell/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Bagilov/clamshell/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Bagilov/clamshell/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Bagilov/clamshell/releases/tag/v0.1.0
