@@ -166,10 +166,10 @@ public struct ClamshellCommand: Sendable {
     ///   - darken: Whether to blank the display immediately.
     public func enable(
         duration: DurationOption,
-        floor: BatteryFloorOption = .off,
+        floor: BatteryFloor = .off,
         darken: Bool = false
     ) throws {
-        try enable(span: duration.span, floor: floor, darken: darken)
+        try enable(span: duration.span, floorPercent: floor.percent, darken: darken)
     }
 
     /// Build the `clamshell on` argument list for the given options.
@@ -179,20 +179,20 @@ public struct ClamshellCommand: Sendable {
     ///
     /// - Parameters:
     ///   - span: CLI span such as `45m`, or `nil` for no time limit.
-    ///   - floor: Battery level that stops the session, or `.off`.
+    ///   - floorPercent: Battery level that stops the session, or `nil`.
     ///   - darken: Whether to blank the display immediately.
     /// - Returns: The arguments to pass to the CLI, starting with `on`.
     public static func startArguments(
         span: String?,
-        floor: BatteryFloorOption,
+        floorPercent: Int?,
         darken: Bool
     ) -> [String] {
         var arguments = ["on"]
         if let span {
             arguments.append(contentsOf: ["--for", span])
         }
-        if let percent = floor.percent {
-            arguments.append(contentsOf: ["--battery", String(percent)])
+        if let floorPercent {
+            arguments.append(contentsOf: ["--battery", String(floorPercent)])
         }
         if darken {
             arguments.append("--darken")
@@ -205,14 +205,18 @@ public struct ClamshellCommand: Sendable {
     ///
     /// - Parameters:
     ///   - span: CLI span such as `45m`, or `nil` for no time limit.
-    ///   - floor: Battery level that stops the session, or `.off`.
+    ///   - floorPercent: Battery level that stops the session, or `nil`.
     ///   - darken: Whether to blank the display immediately.
     public func enable(
         span: String?,
-        floor: BatteryFloorOption = .off,
+        floorPercent: Int? = nil,
         darken: Bool = false
     ) throws {
-        let arguments = ClamshellCommand.startArguments(span: span, floor: floor, darken: darken)
+        let arguments = ClamshellCommand.startArguments(
+            span: span,
+            floorPercent: floorPercent,
+            darken: darken
+        )
         _ = try run(arguments)
     }
 

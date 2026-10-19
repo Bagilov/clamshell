@@ -10,6 +10,19 @@ releases, and breaking changes are noted explicitly.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-18
+
+### Added
+
+- Manual entry in the menu bar app: **Custom…** under the duration choices
+  accepts forms like `45m`, `2h`, `1h30m` or a bare number of minutes, and
+  **Custom…** under the battery floor accepts any level from 5% to 95%.
+
+### Changed
+
+- The battery floor is now a value rather than a fixed set, so a hand-entered
+  level becomes a first-class choice and is shown as a checked menu row.
+
 ## [0.1.1] - 2026-10-18
 
 ### Fixed
@@ -43,6 +56,7 @@ not yet frozen.
   display toggle and surfaced CLI errors.
 - `--version`, and bundle/version consistency checks.
 
-[Unreleased]: https://github.com/Bagilov/clamshell/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Bagilov/clamshell/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Bagilov/clamshell/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Bagilov/clamshell/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Bagilov/clamshell/releases/tag/v0.1.0

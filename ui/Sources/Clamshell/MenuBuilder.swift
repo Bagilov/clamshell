@@ -9,7 +9,7 @@ import ClamshellCore
 struct MenuBuilder {
     /// The disabled row at the top showing the current state.
     let stateItem = NSMenuItem()
-    /// The battery-floor radio items, in `BatteryFloorOption` order.
+    /// The battery-floor radio items, including the custom entry.
     private(set) var floorItems: [NSMenuItem] = []
     /// The toggle that blanks the display when a session starts.
     private(set) var darkenItem = NSMenuItem()
@@ -25,7 +25,7 @@ struct MenuBuilder {
     mutating func buildMenu(
         target: AnyObject,
         command: ClamshellCommand,
-        floor: BatteryFloorOption,
+        floor: BatteryFloor,
         darken: Bool
     ) -> NSMenu {
         let menu = NSMenu()
@@ -42,7 +42,7 @@ struct MenuBuilder {
         return menu
     }
 
-    /// Keep-awake choices, or a hint when the CLI is not installed.
+    /// Keep-awake choices, with a manual entry, or a hint when not installed.
     private func addSessionItems(to menu: NSMenu, target: AnyObject, command: ClamshellCommand) {
         guard command.isInstalled else {
             let missing = NSMenuItem(
@@ -64,18 +64,33 @@ struct MenuBuilder {
             item.representedObject = option
             menu.addItem(item)
         }
+        let custom = NSMenuItem(
+            title: "Custom…",
+            action: #selector(MenuActions.startCustomSession),
+            keyEquivalent: ""
+        )
+        custom.target = target
+        menu.addItem(custom)
     }
 
-    /// The battery-floor header and its radio-style choices.
+    /// The battery-floor header, presets and a custom entry.
     private mutating func addFloorItems(
         to menu: NSMenu,
         target: AnyObject,
-        floor: BatteryFloorOption
+        floor: BatteryFloor
     ) {
         let header = NSMenuItem(title: "Stop on Low Battery", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
-        floorItems = BatteryFloorOption.allCases.map { option in
+
+        // A custom value that matches no preset still needs a checked row, so it
+        // is appended as its own item rather than silently dropping the state.
+        var choices = BatteryFloor.presets
+        if let percent = floor.percent, !choices.contains(where: { $0.percent == percent }) {
+            choices.append(floor)
+        }
+
+        floorItems = choices.map { option in
             let item = NSMenuItem(
                 title: option.title,
                 action: #selector(MenuActions.selectFloor(_:)),
@@ -87,6 +102,14 @@ struct MenuBuilder {
             menu.addItem(item)
             return item
         }
+
+        let custom = NSMenuItem(
+            title: "Custom…",
+            action: #selector(MenuActions.selectCustomFloor),
+            keyEquivalent: ""
+        )
+        custom.target = target
+        menu.addItem(custom)
     }
 
     /// The display-blanking toggle.
@@ -154,7 +177,9 @@ struct MenuBuilder {
 @objc
 protocol MenuActions {
     func startSession(_ sender: NSMenuItem)
+    func startCustomSession()
     func selectFloor(_ sender: NSMenuItem)
+    func selectCustomFloor()
     func toggleDarken()
     func stopSession()
     func refresh()

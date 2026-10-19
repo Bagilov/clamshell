@@ -13,8 +13,9 @@ final class MenuBarController: NSObject, MenuActions {
     private var tickTimer: Timer?
     private var status = ClamshellStatus.idle
     private var deadline: Date?
-    private var batteryFloor = BatteryFloorOption.off
+    private var batteryFloor = BatteryFloor.off
     private var selectedDuration = DurationOption.indefinite
+    private var customSpan: String?
     private var darkenDisplay = false
     private var lastError: Error?
     private var isWorking = false
@@ -67,6 +68,11 @@ final class MenuBarController: NSObject, MenuActions {
         menu.delegate = observer
     }
 
+    /// Rebuild the menu, used when the set of floor rows changes.
+    private func rebuildMenu() {
+        buildMenu()
+    }
+
     @objc func refresh() {
         guard !isWorking else { return }
         Task { @MainActor in
@@ -78,6 +84,7 @@ final class MenuBarController: NSObject, MenuActions {
     @objc func startSession(_ sender: NSMenuItem) {
         guard let option = sender.representedObject as? DurationOption else { return }
         selectedDuration = option
+        customSpan = nil
         perform {
             try self.command.enable(
                 duration: option,
@@ -87,6 +94,54 @@ final class MenuBarController: NSObject, MenuActions {
         }
     }
 
+    /// Ask for a duration by hand, then start a session with it.
+    @objc func startCustomSession() {
+        guard let input = Prompt.text(
+            title: "Custom Duration",
+            message: "How long should the Mac stay awake? Examples: 45m, 2h, 1h30m, 90.",
+            placeholder: "1h30m"
+        ) else {
+            return
+        }
+        guard let span = DurationFormat.normalizeSpan(input) else {
+            Prompt.invalid(
+                title: "Invalid Duration",
+                message: "Use forms like 45m, 2h or 1h30m. A bare number is minutes."
+            )
+            return
+        }
+        customSpan = span
+        perform {
+            try self.command.enable(
+                span: span,
+                floorPercent: self.batteryFloor.percent,
+                darken: self.darkenDisplay
+            )
+        }
+    }
+
+    /// Ask for a battery floor by hand.
+    @objc func selectCustomFloor() {
+        guard let input = Prompt.text(
+            title: "Custom Battery Level",
+            message: "Stop clamshell mode when the battery reaches this level "
+                + "(\(BatteryFloorRange.minimum)–\(BatteryFloorRange.maximum)%).",
+            placeholder: "25",
+            defaultValue: batteryFloor.percent.map(String.init) ?? ""
+        ) else {
+            return
+        }
+        guard let floor = BatteryFloor.custom(input) else {
+            Prompt.invalid(
+                title: "Invalid Battery Level",
+                message: "Enter a whole number between \(BatteryFloorRange.minimum) "
+                    + "and \(BatteryFloorRange.maximum)."
+            )
+            return
+        }
+        applyFloor(floor)
+    }
+
     /// Toggle whether starting a session also blanks the display.
     @objc func toggleDarken() {
         darkenDisplay.toggle()
@@ -94,16 +149,36 @@ final class MenuBarController: NSObject, MenuActions {
     }
 
     @objc func selectFloor(_ sender: NSMenuItem) {
-        guard let option = sender.representedObject as? BatteryFloorOption else { return }
-        batteryFloor = option
-        for item in menuBuilder.floorItems {
-            item.state = (item.representedObject as? BatteryFloorOption) == option ? .on : .off
-        }
+        guard let option = sender.representedObject as? BatteryFloor else { return }
+        applyFloor(option)
+    }
+
+    /// Store a new floor, refresh the menu ticks and re-apply a running session.
+    private func applyFloor(_ floor: BatteryFloor) {
+        batteryFloor = floor
+        markFloorSelection()
         guard status.isDisabled else { return }
         // Re-apply with the time still remaining, so changing the floor mid-run
         // never restarts the countdown from full length.
-        let span = remainingSeconds.map(String.init) ?? selectedDuration.span
-        perform { try self.command.enable(span: span, floor: option) }
+        let span = remainingSeconds.map(String.init) ?? customSpan ?? selectedDuration.span
+        perform { try self.command.enable(span: span, floorPercent: floor.percent) }
+    }
+
+    /// Tick the floor row matching the stored selection.
+    ///
+    /// A custom value has no preset row, so a matching row is added first;
+    /// otherwise the menu would show no selection at all.
+    private func markFloorSelection() {
+        let hasRow = menuBuilder.floorItems.contains { item in
+            (item.representedObject as? BatteryFloor) == batteryFloor
+        }
+        guard hasRow else {
+            rebuildMenu()
+            return
+        }
+        for item in menuBuilder.floorItems {
+            item.state = (item.representedObject as? BatteryFloor) == batteryFloor ? .on : .off
+        }
     }
 
     @objc func stopSession() {
@@ -179,13 +254,11 @@ final class MenuBarController: NSObject, MenuActions {
 
     /// Reflect the floor reported by the CLI in the stored selection and menu.
     private func syncFloorFromStatus() {
-        let reported = status.batteryFloor ?? 0
-        let option = BatteryFloorOption(rawValue: reported) ?? .off
-        guard option != batteryFloor else { return }
-        batteryFloor = option
-        for item in menuBuilder.floorItems {
-            item.state = (item.representedObject as? BatteryFloorOption) == option ? .on : .off
-        }
+        let reported = status.batteryFloor
+        let floor = BatteryFloor.preset(reported) ?? .off
+        guard floor != batteryFloor else { return }
+        batteryFloor = floor
+        markFloorSelection()
     }
 
     private func present(_ error: Error) {

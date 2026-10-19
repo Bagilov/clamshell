@@ -105,6 +105,11 @@ icon. Its menu offers the duration choices, a "Stop on Low Battery" section with
 the battery floor levels, a "Turn Display Off" toggle, "Stop Clamshell Mode",
 "Refresh", "About Clamshell" with the repository link, and "Quit".
 
+Both the duration and the battery floor can be entered by hand through
+**Custom…**. The duration field accepts `45m`, `2h`, `1h30m` or a bare number of
+minutes; the battery field accepts any whole level from 5% to 95%. A hand-entered
+value is validated before it is used and then shown as a checked menu row.
+
 While a timed session runs, the remaining time is shown next to the glyph in
 the menu bar (`3h52m`), ticking every second. It reads `∞` for an unlimited
 session and `🔋` for a battery-limited one. The countdown ticks locally from the

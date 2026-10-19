@@ -79,6 +79,77 @@ public enum DurationFormat {
         return total
     }
 
+    /// Longest accepted custom duration, in seconds.
+    ///
+    /// The point of a timer is not having to remember to switch sleep back on,
+    /// so a typo like `999999999` must not create an effectively endless
+    /// session. A month is far beyond any real clamshell use.
+    public static let maximumSeconds = 30 * 86400
+
+    /// Normalise free-form user input into a span the CLI accepts.
+    ///
+    /// Accepts `<count><unit>` groups with optional spaces (`1h30m`, `1h 30m`)
+    /// using `s`, `m`, `h`, `d`, and treats a bare number as minutes, which is
+    /// what someone typing "45" into a timer field means. Zero-length groups are
+    /// dropped, so `0h30m` becomes `30m`.
+    ///
+    /// - Parameter input: Raw text from a text field.
+    /// - Returns: A canonical span such as `1h45m`, or `nil` when the input is
+    ///   empty, malformed, resolves to zero, or exceeds `maximumSeconds`.
+    public static func normalizeSpan(_ input: String) -> String? {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !text.isEmpty else { return nil }
+        if let minutes = Int(text) {
+            guard minutes > 0 else { return nil }
+            let span = "\(minutes)m"
+            return withinLimit(span) ? span : nil
+        }
+
+        var index = text.startIndex
+        var parts: [(count: Int, unit: Character)] = []
+        while index < text.endIndex {
+            if text[index] == " " {
+                index = text.index(after: index)
+                continue
+            }
+            var digits = ""
+            while index < text.endIndex, text[index].isNumber {
+                digits.append(text[index])
+                index = text.index(after: index)
+            }
+            guard !digits.isEmpty, index < text.endIndex else { return nil }
+            let unit = text[index]
+            guard size(of: unit) != nil, let count = Int(digits) else { return nil }
+            index = text.index(after: index)
+            if count > 0 {
+                parts.append((count, unit))
+            }
+        }
+        guard !parts.isEmpty else { return nil }
+        let span = parts.map { "\($0.count)\($0.unit)" }.joined()
+        return withinLimit(span) ? span : nil
+    }
+
+    /// Whether a span parses and stays within `maximumSeconds`.
+    private static func withinLimit(_ span: String) -> Bool {
+        guard let seconds = seconds(fromText: spaced(span)) else { return false }
+        return seconds <= maximumSeconds
+    }
+
+    /// Convert a CLI span like `1h30m` into the display form `1h 30m`.
+    private static func spaced(_ span: String) -> String {
+        var groups: [String] = []
+        var current = ""
+        for character in span {
+            current.append(character)
+            if character.isLetter {
+                groups.append(current)
+                current = ""
+            }
+        }
+        return groups.joined(separator: " ")
+    }
+
     /// Render a second count for the narrow menu bar, for example `3h59m`.
     ///
     /// Shows at most two units so the label keeps a stable, small width, drops
