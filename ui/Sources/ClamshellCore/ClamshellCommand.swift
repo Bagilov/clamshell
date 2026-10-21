@@ -109,11 +109,20 @@ public struct ClamshellCommand: Sendable {
         path
     }
 
+    /// How long a terminated child may take to exit before it is killed.
+    private static let terminateGrace: TimeInterval = 5
+
     /// Run the CLI with the given arguments and return its stdout.
+    ///
+    /// Both pipes are drained on background queues while the child runs. A macOS
+    /// pipe buffer is about 64 KiB, so reading only after exit deadlocks as soon
+    /// as the CLI writes more than that — a Python traceback on stderr is enough.
+    /// Waiting is bounded by `timeout`, after which the child is terminated and,
+    /// if it still refuses to exit, killed.
     ///
     /// - Parameter arguments: Subcommand and options, for example `["on", "--for", "1h"]`.
     /// - Returns: The trimmed standard output.
-    /// - Throws: `ClamshellError` when the CLI is missing or exits non-zero.
+    /// - Throws: `ClamshellError` when the CLI is missing, times out or exits non-zero.
     public func run(_ arguments: [String]) throws -> String {
         guard isInstalled else { throw ClamshellError.cliNotFound(path) }
         let process = Process()
@@ -124,22 +133,39 @@ public struct ClamshellCommand: Sendable {
         process.standardOutput = stdout
         process.standardError = stderr
 
+        let exitSignal = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exitSignal.signal() }
+
         try process.run()
 
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning, Date() < deadline {
-            usleep(20000)
+        // Start draining only after a successful spawn, so a launch failure
+        // cannot leave reader threads blocked on a pipe nobody will close.
+        let captures = [PipeCapture(stdout), PipeCapture(stderr)]
+        let readers = DispatchGroup()
+        for capture in captures {
+            readers.enter()
+            DispatchQueue.global(qos: .utility).async {
+                capture.drain()
+                readers.leave()
+            }
         }
-        if process.isRunning {
+
+        if exitSignal.wait(timeout: .now() + timeout) == .timedOut {
             process.terminate()
+            if exitSignal.wait(timeout: .now() + Self.terminateGrace) == .timedOut {
+                kill(process.processIdentifier, SIGKILL)
+                exitSignal.wait()
+            }
+            Self.finishReading(captures, readers: readers)
             throw ClamshellError.commandFailed(
                 command: joined(arguments),
                 detail: "timed out after \(Int(timeout))s"
             )
         }
+        Self.finishReading(captures, readers: readers)
 
-        let out = readAll(stdout).trimmingCharacters(in: .whitespacesAndNewlines)
-        let err = readAll(stderr).trimmingCharacters(in: .whitespacesAndNewlines)
+        let out = captures[0].text
+        let err = captures[1].text
         guard process.terminationStatus == 0 else {
             throw ClamshellError.commandFailed(
                 command: joined(arguments),
@@ -229,8 +255,87 @@ public struct ClamshellCommand: Sendable {
         (["clamshell"] + arguments).joined(separator: " ")
     }
 
-    private func readAll(_ pipe: Pipe) -> String {
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(bytes: data, encoding: .utf8) ?? ""
+    /// Wait for the reader queues, forcing `drain()` to stop if they stall.
+    ///
+    /// A terminated child can leave a descendant holding the pipe's write end,
+    /// so EOF may never arrive. Stopping the readers keeps `run`'s time bound
+    /// absolute instead of waiting on a pipe nobody will close.
+    private static func finishReading(_ captures: [PipeCapture], readers: DispatchGroup) {
+        guard readers.wait(timeout: .now() + terminateGrace) == .timedOut else { return }
+        for capture in captures {
+            capture.stop()
+        }
+        _ = readers.wait(timeout: .now() + terminateGrace)
+    }
+}
+
+/// Drains one pipe to EOF on a background queue.
+///
+/// Keeping the reader off the caller's thread is what makes large output safe:
+/// the child never blocks on a full pipe buffer while the parent waits for exit.
+///
+/// Reading uses `poll` with a short timeout instead of a blocking read, so
+/// `stop()` can end the loop even when a surviving descendant still holds the
+/// write end open and EOF never arrives.
+private final class PipeCapture: @unchecked Sendable {
+    /// How long `poll` blocks before the stop flag is checked again.
+    private static let pollInterval: Int32 = 200
+
+    private let descriptor: Int32
+    private let lock = NSLock()
+    private var data = Data()
+    private var stopped = false
+
+    init(_ pipe: Pipe) {
+        descriptor = pipe.fileHandleForReading.fileDescriptor
+    }
+
+    /// Read until the write end closes or `stop()` is called.
+    func drain() {
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        while !isStopped {
+            var target = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+            let ready = poll(&target, 1, Self.pollInterval)
+            if ready < 0 {
+                if errno == EINTR {
+                    continue
+                }
+                return
+            }
+            if ready == 0 {
+                continue
+            }
+            let count = read(descriptor, &buffer, buffer.count)
+            if count > 0 {
+                lock.lock()
+                data.append(contentsOf: buffer[0 ..< count])
+                lock.unlock()
+            } else if count == 0 {
+                return
+            } else if errno != EAGAIN, errno != EINTR {
+                return
+            }
+        }
+    }
+
+    /// Ask `drain()` to return without waiting for EOF.
+    func stop() {
+        lock.lock()
+        stopped = true
+        lock.unlock()
+    }
+
+    private var isStopped: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return stopped
+    }
+
+    /// Captured output, trimmed of surrounding whitespace and newlines.
+    var text: String {
+        lock.lock()
+        defer { lock.unlock() }
+        let decoded = String(bytes: data, encoding: .utf8) ?? ""
+        return decoded.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

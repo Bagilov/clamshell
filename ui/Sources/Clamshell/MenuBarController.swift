@@ -37,11 +37,17 @@ final class MenuBarController: NSObject, MenuActions {
         )
         // The CLI is queried every 5s, but the displayed countdown ticks every
         // second from the local deadline so it looks live without shelling out.
+        // Both timers also join the common run loop mode, because an open menu
+        // switches the loop to tracking mode where only common timers fire.
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.render() }
+        }
+        for timer in [refreshTimer, tickTimer] {
+            guard let timer else { continue }
+            RunLoop.main.add(timer, forMode: .common)
         }
     }
 
@@ -217,7 +223,7 @@ final class MenuBarController: NSObject, MenuActions {
             do {
                 try action()
             } catch {
-                present(error)
+                Prompt.failure(error)
             }
             await refreshStatus()
             render()
@@ -259,15 +265,6 @@ final class MenuBarController: NSObject, MenuActions {
         guard floor != batteryFloor else { return }
         batteryFloor = floor
         markFloorSelection()
-    }
-
-    private func present(_ error: Error) {
-        let alert = NSAlert()
-        alert.messageText = "Clamshell"
-        alert.informativeText = error.localizedDescription
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
     }
 
     private func renderBusy() {

@@ -45,6 +45,18 @@ enum Prompt {
 
     /// Show a validation failure for a prompt that was already dismissed.
     static func invalid(title: String, message: String) {
+        warn(title: title, message: message)
+    }
+
+    /// Report a failure from a background action, such as a CLI error.
+    ///
+    /// Activating first matters for an accessory app: with no key window the
+    /// alert would otherwise open behind the frontmost app and go unseen.
+    static func failure(_ error: Error) {
+        warn(title: "Clamshell", message: error.localizedDescription)
+    }
+
+    private static func warn(title: String, message: String) {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
