@@ -10,6 +10,23 @@ releases, and breaking changes are noted explicitly.
 
 ## [Unreleased]
 
+### Fixed
+
+- The menu bar app no longer hangs for the full command timeout when the CLI
+  writes more than the ~64 KiB pipe buffer. Output is drained on background
+  queues, and a timed-out child is terminated, then killed if it refuses to exit.
+- A CLI error is now shown in front of the active app, and the countdown keeps
+  ticking while the menu is open.
+- `clamshell status` reports a reached battery floor even when a time limit is
+  also active.
+- The helper rotates its log through a `mktemp` file, so a pre-created symlink at
+  the old predictable path cannot redirect the write. The rotated file keeps the
+  world-readable `644` mode of the original.
+- A command that times out now returns even when a surviving descendant still
+  holds the output pipe open, so the app can never wait forever on a reader.
+- `package.sh` fails with a clear message when the version cannot be read and
+  ships only the known modules instead of every `clamshell_*.py`.
+
 ## [0.2.0] - 2026-10-18
 
 ### Added

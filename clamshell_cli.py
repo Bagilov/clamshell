@@ -118,7 +118,6 @@ def cmd_status(_: argparse.Namespace) -> int:
             print("Auto-restore deadline has passed; run 'clamshell off' if needed.")
     if stored.floor > 0:
         print(f"Auto-restore at {stored.floor}% battery.")
-    if stored.deadline is None and stored.floor > 0:
         state = battery_state()
         if state is not None and state.on_battery and state.percent <= stored.floor:
             print("Battery floor reached; run 'clamshell off' if needed.")

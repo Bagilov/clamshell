@@ -113,6 +113,25 @@ def test_status_mentions_floor(stubbed: dict, tmp_path: Path, monkeypatch) -> No
     assert cli.main(["status"]) == 0
 
 
+def test_status_warns_about_reached_floor_even_with_deadline(
+    stubbed: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A timer must not hide an already-reached battery floor.
+
+    Reported by review: with `--for 2h --battery 50` at 10% the warning was
+    gated behind `deadline is None`, so the user saw only the countdown.
+    """
+    state = tmp_path / "state.plist"
+    monkeypatch.setattr(core, "STATE_PATH", state)
+    monkeypatch.setattr(cli, "sleep_disabled", lambda: True)
+    monkeypatch.setattr(
+        cli, "battery_state", lambda: BatteryState(percent=10, on_battery=True)
+    )
+    core.write_state(int(__import__("time").time()) + 3600, 50)
+    assert cli.main(["status"]) == 0
+    assert "Battery floor reached" in capsys.readouterr().out
+
+
 def test_battery_reports_missing_battery(stubbed: dict, monkeypatch) -> None:
     monkeypatch.setattr(cli, "battery_state", lambda: None)
     assert cli.main(["battery"]) == 0
