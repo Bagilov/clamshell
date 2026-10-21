@@ -20,7 +20,11 @@ step() { printf '\n==> %s\n' "$*"; }
 VERSION="$(python3 - "$REPO_DIR/clamshell_core.py" <<'PY'
 import re, sys
 text = open(sys.argv[1]).read()
-print(re.search(r'^VERSION = "([^"]+)"', text, re.M).group(1))
+match = re.search(r'^VERSION = "([^"]+)"', text, re.M)
+if match is None:
+    print("VERSION not found in clamshell_core.py", file=sys.stderr)
+    sys.exit(1)
+print(match.group(1))
 PY
 )"
 PAYLOAD="$BUILD_DIR/payload"
@@ -38,7 +42,12 @@ mkdir -p "$PAYLOAD/usr/local/lib/clamshell" \
          "$PAYLOAD/Applications" \
          "$SCRIPTS"
 
-install -m 644 "$REPO_DIR"/clamshell_*.py "$PAYLOAD/usr/local/lib/clamshell/"
+install -m 644 \
+    "$REPO_DIR/clamshell_core.py" \
+    "$REPO_DIR/clamshell_battery.py" \
+    "$REPO_DIR/clamshell_cli.py" \
+    "$REPO_DIR/clamshell_privileged.py" \
+    "$PAYLOAD/usr/local/lib/clamshell/"
 install -m 755 "$REPO_DIR/clamshell_timer.sh" "$PAYLOAD/usr/local/lib/clamshell/"
 install -m 755 "$REPO_DIR/clamshell_helper.sh" "$PAYLOAD/usr/local/lib/clamshell/"
 install -m 755 "$REPO_DIR/clamshell_helper.sh" "$PAYLOAD/usr/local/sbin/clamshell-helper"

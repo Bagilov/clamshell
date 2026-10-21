@@ -7,29 +7,45 @@
 
 set -euo pipefail
 
-PMSET=/usr/bin/pmset
-LOG=/var/log/clamshell-helper.log
-MAX_LOG_BYTES=262144
+PMSET=${PMSET:-/usr/bin/pmset}
+LOG=${LOG:-/var/log/clamshell-helper.log}
+MAX_LOG_BYTES=${MAX_LOG_BYTES:-262144}
 
 log() {
     # Keep the log bounded so a long-running install cannot grow it forever.
+    # `mktemp` creates the staging file with O_EXCL under a randomised name, so a
+    # predictable path cannot be pre-created as a symlink to a system file.
     if [[ -f "$LOG" ]] && (( $(wc -c < "$LOG" 2>/dev/null || echo 0) > MAX_LOG_BYTES )); then
-        tail -n 200 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG" || true
+        local tmp
+        if tmp=$(mktemp "${LOG}.XXXXXX" 2>/dev/null); then
+            if tail -n 200 "$LOG" > "$tmp" 2>/dev/null; then
+                # `mktemp` creates the file 0600, but the log is meant to be
+                # world-readable like the postinstall-created original.
+                chmod 644 "$tmp"
+                mv "$tmp" "$LOG"
+            else
+                rm -f "$tmp"
+            fi
+        fi
     fi
     printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOG" 2>/dev/null || true
 }
 
-case "${1:-}" in
-    on)
-        "$PMSET" disablesleep 1
-        log "on"
-        ;;
-    off)
-        "$PMSET" disablesleep 0
-        log "off"
-        ;;
-    *)
-        echo "usage: clamshell-helper {on|off}" >&2
-        exit 2
-        ;;
-esac
+# Source with CLAMSHELL_HELPER_LIB=1 to reuse `log` in tests without touching
+# pmset or the real log path.
+if [[ "${CLAMSHELL_HELPER_LIB:-}" != "1" ]]; then
+    case "${1:-}" in
+        on)
+            "$PMSET" disablesleep 1
+            log "on"
+            ;;
+        off)
+            "$PMSET" disablesleep 0
+            log "off"
+            ;;
+        *)
+            echo "usage: clamshell-helper {on|off}" >&2
+            exit 2
+            ;;
+    esac
+fi

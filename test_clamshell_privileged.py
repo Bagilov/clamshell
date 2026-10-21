@@ -65,6 +65,17 @@ def test_write_command_creates_parent_directory() -> None:
     assert "mkdir -p /usr/local/lib/demo" in fragment
 
 
+def test_write_command_quotes_paths_with_spaces() -> None:
+    fragment = privileged.write_command("/tmp/demo dir/tool name", "x")
+    assert "'/tmp/demo dir/tool name'" in fragment
+
+
+def test_write_command_rejects_shell_metacharacters_as_literal() -> None:
+    fragment = privileged.write_command("/tmp/demo; rm -rf /", "x")
+    assert "'/tmp/demo; rm -rf /'" in fragment
+    assert " > /tmp/demo; " not in fragment
+
+
 def test_sudoers_command_validates_before_install() -> None:
     fragment = privileged.sudoers_command("testuser ALL=(root) NOPASSWD: /bin/true")
     assert fragment.index("visudo -cf") < fragment.index("install -m 440")

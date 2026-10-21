@@ -111,10 +111,11 @@ def write_command(target: str, content: str, mode: str = "755") -> str:
     """
     payload = base64.b64encode(content.encode()).decode()
     parent = shlex.quote(str(Path(target).parent))
+    path = shlex.quote(str(target))
     return (
         f"mkdir -p {parent} && "
-        f"printf '%s' '{payload}' | base64 -d > {target} && "
-        f"chown root:wheel {target} && chmod {mode} {target}"
+        f"printf '%s' '{payload}' | base64 -d > {path} && "
+        f"chown root:wheel {path} && chmod {shlex.quote(mode)} {path}"
     )
 
 
@@ -132,13 +133,14 @@ def sudoers_command(rule: str) -> str:
         A shell fragment suitable for :func:`admin_shell`.
     """
     payload = base64.b64encode(f"{rule}\n".encode()).decode()
+    destination = shlex.quote(str(SUDOERS_PATH))
     return (
         "set -e; "
         "tmp=$(mktemp /tmp/.clamshell-rule.XXXXXX); "
         f"printf '%s' '{payload}' | base64 -d > \"$tmp\"; "
         'chmod 600 "$tmp"; '
         'visudo -cf "$tmp"; '
-        f'install -m 440 -o root -g wheel "$tmp" {SUDOERS_PATH}; '
+        f'install -m 440 -o root -g wheel "$tmp" {destination}; '
         'rm -f "$tmp"'
     )
 

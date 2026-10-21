@@ -26,10 +26,13 @@ jobs:
         run: python -m pytest -q
       - name: Timer helper tests
         run: bash clamshell_timer_test.sh
+      - name: Helper tests
+        run: bash clamshell_helper_test.sh
       - name: Shellcheck
         run: |
           brew install shellcheck
-          shellcheck clamshell_helper.sh clamshell_timer.sh clamshell_timer_test.sh ui/build.sh
+          shellcheck clamshell_helper.sh clamshell_helper_test.sh clamshell_timer.sh \
+            clamshell_timer_test.sh ui/build.sh package.sh
 
   swift:
     name: Swift lint, build and tests
