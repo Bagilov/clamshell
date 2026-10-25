@@ -14,6 +14,7 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sys
 import time
@@ -37,6 +38,7 @@ from clamshell_core import (
     helper_toggle,
     parse_span,
     read_state,
+    reconcile_state,
     require_macos,
     schedule_auto_off,
     sleep_disabled,
@@ -54,39 +56,53 @@ def cmd_on(args: argparse.Namespace) -> int:
     """Disable sleep with optional time and battery-floor auto-restore.
 
     Running ``on`` clears any pending trigger first, so an earlier session
-    cannot silently turn sleep back on later in the day.
+    cannot silently turn sleep back on later in the day. A watcher is always
+    left running: besides the triggers, it is what keeps the built-in panel dark
+    while the lid is shut.
     """
     require_macos()
     floor = validate_percent(args.battery) if args.battery is not None else 0
     seconds = parse_span(args.duration) if args.duration else None
-    if seconds is None and floor <= 0:
-        helper_toggle(True)
-        cancel_timer()
-        print("Sleep disabled. The lid can be closed now; run 'clamshell off' to stop.")
+    helper_toggle(True)
+    schedule_auto_off(seconds, floor)
+    triggers = []
+    if seconds is not None:
+        triggers.append(f"auto-restore in {format_span(seconds)}")
+    if floor > 0:
+        triggers.append(f"auto-restore at {floor}% battery")
+    message = "Sleep disabled."
+    if triggers:
+        message += " " + ", ".join(triggers).capitalize() + "."
     else:
-        helper_toggle(True)
-        schedule_auto_off(seconds, floor)
-        triggers = []
-        if seconds is not None:
-            triggers.append(f"auto-restore in {format_span(seconds)}")
-        if floor > 0:
-            triggers.append(f"auto-restore at {floor}% battery")
-        print("Sleep disabled. " + ", ".join(triggers).capitalize() + ".")
+        message += " The lid can be closed now; run 'clamshell off' to stop."
+    print(message)
     if args.darken:
         sleep_display()
         print("Display turned off.")
     return 0
 
 
-def cmd_battery(_: argparse.Namespace) -> int:
+def cmd_battery(args: argparse.Namespace) -> int:
     """Print the current battery level and whether the floor would apply."""
     state = battery_state()
+    stored = read_state()
+    if getattr(args, "json", False):
+        print(
+            json.dumps(
+                {
+                    "percent": None if state is None else state.percent,
+                    "onBattery": None if state is None else state.on_battery,
+                    "floor": stored.floor,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
     if state is None:
         print("No battery detected (desktop Mac or unsupported hardware).")
         return 0
     source = "battery" if state.on_battery else "wall power"
     print(f"Battery at {state.percent}% (drawing from {source}).")
-    stored = read_state()
     if stored.floor > 0:
         if state.on_battery:
             print(f"Battery floor set to {stored.floor}%.")
@@ -96,20 +112,45 @@ def cmd_battery(_: argparse.Namespace) -> int:
 
 
 def cmd_off(_: argparse.Namespace) -> int:
-    """Restore normal sleep behaviour and drop any pending trigger."""
-    cancel_timer()
+    """Restore normal sleep behaviour and drop any pending trigger.
+
+    Sleep is restored before the timer is cancelled. If the privileged call
+    fails, the timer and state survive so the session can still be recovered;
+    cancelling first would leave sleep disabled with nothing left to restore it.
+    """
     helper_toggle(False)
+    cancel_timer()
     print("Sleep restored to normal behaviour.")
     return 0
 
 
-def cmd_status(_: argparse.Namespace) -> int:
-    """Print the current sleep state and any pending auto-restore trigger."""
-    if sleep_disabled():
+def cmd_status(args: argparse.Namespace) -> int:
+    """Print the current sleep state and any pending auto-restore trigger.
+
+    ``--json`` emits the same facts for programmatic callers (the menu bar app),
+    which otherwise has to parse the human text and breaks on any wording change.
+    """
+    disabled = sleep_disabled()
+    stored = read_state()
+    if getattr(args, "json", False):
+        remaining = None
+        if stored.deadline is not None:
+            remaining = max(0, stored.deadline - int(time.time()))
+        print(
+            json.dumps(
+                {
+                    "disabled": disabled,
+                    "remainingSeconds": remaining,
+                    "floor": stored.floor,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    if disabled:
         print("Sleep is DISABLED (clamshell mode active).")
     else:
         print("Sleep is enabled (normal behaviour).")
-    stored = read_state()
     if stored.deadline is not None:
         remaining = stored.deadline - int(time.time())
         if remaining > 0:
@@ -121,6 +162,36 @@ def cmd_status(_: argparse.Namespace) -> int:
         state = battery_state()
         if state is not None and state.on_battery and state.percent <= stored.floor:
             print("Battery floor reached; run 'clamshell off' if needed.")
+    return 0
+
+
+def cmd_reconcile(_: argparse.Namespace) -> int:
+    """Re-align a leftover timer with reality after a restart.
+
+    The watcher is a transient launchd job, so a reboot or a crash can leave a
+    state file behind with nothing scheduled. Called by the menu bar app at
+    launch; safe to run at any time.
+    """
+    outcome = reconcile_state()
+    messages = {
+        "clean": "Nothing to reconcile.",
+        "running": "Auto-restore watcher is running.",
+        "rearmed": "Auto-restore watcher re-armed after a restart.",
+        "restored": "Missed auto-restore applied; sleep restored.",
+    }
+    print(messages[outcome])
+    return 0
+
+
+def cmd_darken(_: argparse.Namespace) -> int:
+    """Blank the display now, for a session that is already running.
+
+    ``on --darken`` only blanks the display as the session starts; this lets the
+    menu bar app apply the toggle to a session that is already active.
+    """
+    require_macos()
+    sleep_display()
+    print("Display turned off.")
     return 0
 
 
@@ -204,10 +275,28 @@ def build_parser() -> argparse.ArgumentParser:
     off.set_defaults(func=cmd_off)
 
     status = sub.add_parser("status", help="show current clamshell state")
+    status.add_argument(
+        "--json",
+        action="store_true",
+        help="emit machine-readable JSON instead of text",
+    )
     status.set_defaults(func=cmd_status)
 
+    reconcile = sub.add_parser(
+        "reconcile", help="re-align a leftover timer after a restart"
+    )
+    reconcile.set_defaults(func=cmd_reconcile)
+
     battery = sub.add_parser("battery", help="show battery level and floor")
+    battery.add_argument(
+        "--json",
+        action="store_true",
+        help="emit machine-readable JSON instead of text",
+    )
     battery.set_defaults(func=cmd_battery)
+
+    darken = sub.add_parser("darken", help="turn the display off now")
+    darken.set_defaults(func=cmd_darken)
 
     install = sub.add_parser("install", help="install helper and sudoers rule")
     install.set_defaults(func=cmd_install)

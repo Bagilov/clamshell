@@ -42,6 +42,9 @@ TIMER_SCRIPT = MODULE_DIR / TIMER_NAME
 PMSET = Path("/usr/bin/pmset")
 DEFAULT_TIMEOUT = 60.0
 FAR_FUTURE = 4_102_444_800
+#: Ceiling on a keep-awake duration. An accidental extra digit would otherwise
+#: schedule a session years out; the menu bar app applies the same 30-day limit.
+MAX_DURATION_SECONDS = 30 * 86400
 
 #: Project version, following semantic versioning. Major zero marks the current
 #: pre-release line: the interface may still change between minor releases.
@@ -57,15 +60,19 @@ class ClamshellError(RuntimeError):
 
 @dataclass(frozen=True)
 class TimerState:
-    """Persisted auto-restore settings.
+    """Persisted session settings.
 
     Attributes:
         deadline: Epoch seconds when sleep is restored, or None for no limit.
         floor: Battery percentage that restores sleep, or 0 when disabled.
+        watching: Whether the session watcher is meant to be running. It is
+            stored so an indefinite session — no deadline and no floor — is still
+            recognisable, both by ``status`` and by ``reconcile`` after a restart.
     """
 
     deadline: int | None
     floor: int
+    watching: bool = False
 
 
 def parse_span(value: str) -> int:
@@ -95,6 +102,10 @@ def parse_span(value: str) -> int:
         seconds = sum(int(m.group(1)) * _UNITS[m.group(2)] for m in matches)
     if seconds <= 0:
         raise ClamshellError("duration must be greater than zero")
+    if seconds > MAX_DURATION_SECONDS:
+        raise ClamshellError(
+            f"duration must not exceed {format_span(MAX_DURATION_SECONDS)}"
+        )
     return seconds
 
 
@@ -201,47 +212,55 @@ def sleep_display() -> None:
     run([str(PMSET), "displaysleepnow"])
 
 
-def write_state(deadline: int | None, floor: int = 0) -> None:
-    """Persist the timer deadline and battery floor, or clear them.
+def write_state(deadline: int | None, floor: int = 0, watching: bool = False) -> None:
+    """Persist the session trigger and whether a watcher is running.
 
     Args:
         deadline: Epoch seconds when sleep is restored, or None to clear.
         floor: Battery percentage at which sleep is restored, 0 to disable.
+        watching: Whether the session watcher is meant to be running. An
+            indefinite session has neither a deadline nor a floor but still
+            needs a watcher, so it cannot be inferred from the other two.
     """
-    if deadline is None and floor <= 0:
+    if deadline is None and floor <= 0 and not watching:
         STATE_PATH.unlink(missing_ok=True)
         return
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload: dict[str, int] = {}
+    payload: dict[str, int | bool] = {}
     if deadline is not None:
         payload["Deadline"] = deadline
     if floor > 0:
         payload["BatteryFloor"] = floor
+    if watching:
+        payload["Watching"] = True
     with STATE_PATH.open("wb") as handle:
         plistlib.dump(payload, handle)
 
 
 def read_state() -> TimerState:
-    """Return the persisted timer state.
+    """Return the persisted session state.
 
     Returns:
-        The stored deadline and battery floor, each ``None`` or ``0`` when the
-        file is absent, unreadable or does not carry that field.
+        The stored deadline, battery floor and watcher flag; each ``None``,
+        ``0`` or ``False`` when the file is absent, unreadable or does not carry
+        that field.
     """
+    empty = TimerState(deadline=None, floor=0)
     if not STATE_PATH.exists():
-        return TimerState(deadline=None, floor=0)
+        return empty
     try:
         with STATE_PATH.open("rb") as handle:
             payload = plistlib.load(handle)
     except (OSError, plistlib.InvalidFileException):
-        return TimerState(deadline=None, floor=0)
+        return empty
     if not isinstance(payload, dict):
-        return TimerState(deadline=None, floor=0)
+        return empty
     raw_deadline = payload.get("Deadline")
     raw_floor = payload.get("BatteryFloor")
     deadline = int(raw_deadline) if isinstance(raw_deadline, (int, float)) else None
     floor = int(raw_floor) if isinstance(raw_floor, (int, float)) else 0
-    return TimerState(deadline=deadline, floor=floor)
+    watching = bool(payload.get("Watching"))
+    return TimerState(deadline=deadline, floor=floor, watching=watching)
 
 
 def cancel_timer() -> None:
@@ -255,16 +274,79 @@ def cancel_timer() -> None:
     write_state(None)
 
 
+def timer_job_running() -> bool:
+    """Whether the auto-restore watcher is currently registered with launchd.
+
+    The watcher is submitted as a transient job, so it disappears on reboot and
+    can also die on its own. Without this check a leftover state file would look
+    like a live session that never fires.
+
+    Returns:
+        ``True`` when the watcher label is present in ``launchctl list``.
+    """
+    result = run(["launchctl", "list"], check=False)
+    return TIMER_LABEL in result.stdout
+
+
+def reconcile_state() -> str:
+    """Bring the persisted trigger back in line with reality.
+
+    A state file survives a reboot while the transient watcher job does not, so
+    after a restart sleep could stay disabled with nothing left to restore it.
+    This runs at application start and does the least surprising thing:
+
+    * no watcher was ever recorded: nothing to do;
+    * the watcher is running: leave it alone;
+    * a future trigger with no watcher: re-arm it, keeping the remaining time;
+    * a trigger that already passed with no watcher: restore sleep and clear;
+    * an indefinite session with no watcher: re-arm it, so the built-in panel
+      keeps being blanked for a shut lid.
+
+    Returns:
+        One of ``clean``, ``running``, ``rearmed`` or ``restored``, describing
+        what was found so the caller can report it.
+
+    Raises:
+        ClamshellError: If sleep has to be restored and the helper refuses.
+    """
+    stored = read_state()
+    # A state file written before the watcher flag existed still records a real
+    # session, so a deadline or a floor also counts as something to reconcile.
+    watching = stored.watching or stored.deadline is not None or stored.floor > 0
+    if not watching:
+        return "clean"
+    if timer_job_running():
+        return "running"
+
+    now = int(time.time())
+    if stored.deadline is not None and stored.deadline <= now:
+        # The moment passed with no watcher alive, so the session is orphaned.
+        # Restore first: if that fails the state stays, as in `cmd_off`.
+        if sleep_disabled():
+            helper_toggle(False)
+        cancel_timer()
+        return "restored"
+
+    seconds = None if stored.deadline is None else stored.deadline - now
+    schedule_auto_off(seconds, stored.floor)
+    return "rearmed"
+
+
 def schedule_auto_off(seconds: int | None, floor: int = 0) -> int | None:
-    """Schedule sleep to be restored by time, battery floor, or both.
+    """Start the session watcher, restoring sleep on time, floor, or neither.
+
+    The watcher is submitted for every session, including an indefinite one, and
+    not only when a trigger exists: it is also what keeps the built-in panel dark
+    while the lid is shut, which macOS does not do on its own once
+    ``disablesleep`` is active.
 
     The job runs the watcher script in the current GUI session and calls the
     helper through the NOPASSWD sudoers rule, so no second admin prompt is
     required.
 
     Args:
-        seconds: Positive delay before sleep is re-enabled, or None when only a
-            battery floor applies.
+        seconds: Positive delay before sleep is re-enabled, or None when the
+            session has no time limit.
         floor: Battery percentage at which sleep is re-enabled, 0 to disable.
 
     Returns:
@@ -272,10 +354,8 @@ def schedule_auto_off(seconds: int | None, floor: int = 0) -> int | None:
         applies.
 
     Raises:
-        ClamshellError: If neither a duration nor a battery floor is given.
+        ClamshellError: If a duration is given but is not positive.
     """
-    if seconds is None and floor <= 0:
-        raise ClamshellError("a duration or battery floor is required")
     if seconds is not None and seconds <= 0:
         raise ClamshellError("duration must be greater than zero")
     cancel_timer()
@@ -286,5 +366,5 @@ def schedule_auto_off(seconds: int | None, floor: int = 0) -> int | None:
     )
     run(["launchctl", "submit", "-l", TIMER_LABEL, "--", "/bin/bash", "-c", script])
     stored = deadline if seconds is not None else None
-    write_state(stored, floor)
+    write_state(stored, floor, watching=True)
     return stored

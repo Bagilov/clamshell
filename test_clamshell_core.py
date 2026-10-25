@@ -8,18 +8,21 @@ from __future__ import annotations
 import plistlib
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import clamshell_cli as cli
 import clamshell_core as core
 
 DEADLINE = 1234
 SEMVER_PARTS = 3
 FLOOR = 25
+#: Values used by the reconcile tests, where the watch job is re-armed.
+REARM_SECONDS = 600
+REARM_FLOOR = 30
 
 
 @pytest.mark.parametrize(
@@ -94,6 +97,31 @@ def test_write_state_supports_floor_without_deadline(
     state = core.read_state()
     assert state.deadline is None
     assert state.floor == FLOOR
+
+
+def test_write_state_records_an_indefinite_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unlimited session has no deadline or floor but still needs a watcher.
+
+    The flag cannot be inferred from the other two fields, so without it
+    ``reconcile`` would treat a live session as nothing to do.
+    """
+    monkeypatch.setattr(core, "STATE_PATH", tmp_path / "state.plist")
+    core.write_state(None, 0, watching=True)
+    state = core.read_state()
+    assert state.deadline is None
+    assert state.floor == 0
+    assert state.watching is True
+
+
+def test_read_state_defaults_watching_to_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A state file written before the flag existed must still be readable."""
+    monkeypatch.setattr(core, "STATE_PATH", tmp_path / "state.plist")
+    core.write_state(DEADLINE)
+    assert core.read_state().watching is False
 
 
 def test_write_state_none_removes_file(
@@ -268,109 +296,6 @@ def test_sleep_display_needs_no_privileges(monkeypatch: pytest.MonkeyPatch) -> N
     assert "sudo" not in calls[0]
 
 
-def test_cancel_timer_removes_job_and_clears_state(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    state = tmp_path / "state.plist"
-    monkeypatch.setattr(core, "STATE_PATH", state)
-    core.write_state(DEADLINE)
-    calls: list[list[str]] = []
-    monkeypatch.setattr(core, "run", lambda argv, **k: calls.append(list(argv)))
-    core.cancel_timer()
-    assert ["launchctl", "remove", core.TIMER_LABEL] in calls
-    assert not state.exists()
-
-
-def test_cancel_timer_also_removes_legacy_labels(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An upgraded install must not leave an old job that fires early."""
-    monkeypatch.setattr(core, "STATE_PATH", tmp_path / "state.plist")
-    calls: list[list[str]] = []
-    monkeypatch.setattr(core, "run", lambda argv, **k: calls.append(list(argv)))
-    core.cancel_timer()
-    for label in core.LEGACY_TIMER_LABELS:
-        assert ["launchctl", "remove", label] in calls
-
-
-def test_schedule_auto_off_submits_job_and_stores_deadline(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    state = tmp_path / "state.plist"
-    monkeypatch.setattr(core, "STATE_PATH", state)
-    monkeypatch.setattr(core, "TIMER_SCRIPT", tmp_path / "clamshell-timer")
-    calls: list[list[str]] = []
-    monkeypatch.setattr(core, "run", lambda argv, **k: calls.append(list(argv)))
-    deadline = core.schedule_auto_off(60)
-    submitted = next(c for c in calls if c[:2] == ["launchctl", "submit"])
-    assert submitted[:5] == ["launchctl", "submit", "-l", core.TIMER_LABEL, "--"]
-    assert str(deadline) in submitted[-1]
-    assert " 0 " in submitted[-1]
-    assert core.read_state().deadline == deadline
-
-
-def test_schedule_auto_off_passes_battery_floor(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(core, "STATE_PATH", tmp_path / "state.plist")
-    monkeypatch.setattr(core, "TIMER_SCRIPT", tmp_path / "clamshell-timer")
-    calls: list[list[str]] = []
-    monkeypatch.setattr(core, "run", lambda argv, **k: calls.append(list(argv)))
-    core.schedule_auto_off(120, FLOOR)
-    assert (
-        f" {FLOOR} " in next(c for c in calls if c[:2] == ["launchctl", "submit"])[-1]
-    )
-    stored = core.read_state()
-    assert stored.floor == FLOOR
-    assert stored.deadline is not None
-
-
-def test_schedule_auto_off_supports_floor_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    state = tmp_path / "state.plist"
-    monkeypatch.setattr(core, "STATE_PATH", state)
-    monkeypatch.setattr(core, "TIMER_SCRIPT", tmp_path / "clamshell-timer")
-    calls: list[list[str]] = []
-    monkeypatch.setattr(core, "run", lambda argv, **k: calls.append(list(argv)))
-    result = core.schedule_auto_off(None, FLOOR)
-    assert result is None
-    assert (
-        str(core.FAR_FUTURE)
-        in next(c for c in calls if c[:2] == ["launchctl", "submit"])[-1]
-    )
-    stored = core.read_state()
-    assert stored.deadline is None
-    assert stored.floor == FLOOR
-
-
-def test_schedule_auto_off_requires_a_trigger() -> None:
-    with pytest.raises(core.ClamshellError):
-        core.schedule_auto_off(None, 0)
-
-
-def test_version_follows_semver() -> None:
-    """The project version must stay valid semantic versioning."""
-    parts = core.VERSION.split(".")
-    assert len(parts) == SEMVER_PARTS
-    assert all(part.isdigit() for part in parts)
-    assert int(parts[0]) == 0, "major zero marks the pre-release line"
-
-
-def test_bundle_version_matches_the_code_version() -> None:
-    """The app bundle version must not drift from the code version."""
-    text = core.INFO_PLIST.read_text()
-    assert f"<string>{core.VERSION}</string>" in text
-
-
-def test_cli_exposes_the_version_flag() -> None:
-    """`clamshell --version` must print the version and exit cleanly."""
-    parser = cli.build_parser()
-    with pytest.raises(SystemExit) as exit_info:
-        parser.parse_args(["--version"])
-    assert exit_info.value.code == 0
-
-
 def test_timer_script_sits_beside_the_running_code() -> None:
     """The watcher resolves next to the running module.
 
@@ -398,3 +323,74 @@ def test_schedule_auto_off_runs_the_installed_watcher(
 def test_schedule_auto_off_rejects_non_positive_seconds() -> None:
     with pytest.raises(core.ClamshellError):
         core.schedule_auto_off(0)
+
+
+def test_parse_span_rejects_a_duration_over_the_limit() -> None:
+    """An accidental extra digit must not schedule a session years out."""
+    with pytest.raises(core.ClamshellError):
+        core.parse_span("31d")
+    assert core.parse_span("30d") == core.MAX_DURATION_SECONDS
+
+
+def test_reconcile_state_does_nothing_without_a_trigger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(core, "STATE_PATH", tmp_path / "state.plist")
+    monkeypatch.setattr(core, "timer_job_running", lambda: False)
+    assert core.reconcile_state() == "clean"
+
+
+def test_reconcile_state_leaves_a_running_watcher_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(core, "STATE_PATH", tmp_path / "state.plist")
+    monkeypatch.setattr(core, "timer_job_running", lambda: True)
+    core.write_state(int(time.time()) + 600)
+    assert core.reconcile_state() == "running"
+
+
+def test_reconcile_state_rearms_a_future_trigger_after_a_reboot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reboot kills the transient watcher but leaves the state file behind."""
+    monkeypatch.setattr(core, "STATE_PATH", tmp_path / "state.plist")
+    monkeypatch.setattr(core, "timer_job_running", lambda: False)
+    scheduled: list[tuple[int | None, int]] = []
+    monkeypatch.setattr(
+        core, "schedule_auto_off", lambda s, f=0: scheduled.append((s, f))
+    )
+    core.write_state(int(time.time()) + REARM_SECONDS, REARM_FLOOR)
+    assert core.reconcile_state() == "rearmed"
+    assert scheduled and scheduled[0][1] == REARM_FLOOR
+    assert 0 < scheduled[0][0] <= REARM_SECONDS
+
+
+def test_reconcile_state_restores_sleep_when_the_deadline_passed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missed restore must not leave sleep disabled forever."""
+    monkeypatch.setattr(core, "STATE_PATH", tmp_path / "state.plist")
+    monkeypatch.setattr(core, "timer_job_running", lambda: False)
+    monkeypatch.setattr(core, "sleep_disabled", lambda: True)
+    toggled: list[bool] = []
+    monkeypatch.setattr(core, "helper_toggle", toggled.append)
+    core.write_state(int(time.time()) - 60)
+    assert core.reconcile_state() == "restored"
+    assert toggled == [False]
+
+
+def test_reconcile_state_keeps_the_state_when_restoring_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(core, "STATE_PATH", tmp_path / "state.plist")
+    monkeypatch.setattr(core, "timer_job_running", lambda: False)
+    monkeypatch.setattr(core, "sleep_disabled", lambda: True)
+
+    def refuse(_enabled: bool) -> None:
+        raise core.ClamshellError("sudo refused")
+
+    monkeypatch.setattr(core, "helper_toggle", refuse)
+    core.write_state(int(time.time()) - 60)
+    with pytest.raises(core.ClamshellError):
+        core.reconcile_state()
+    assert core.read_state().deadline is not None

@@ -33,12 +33,14 @@ def block_launchctl(monkeypatch: pytest.MonkeyPatch) -> None:
     """Prevent tests from removing or submitting real launchd jobs.
 
     Tests that need to observe the calls patch ``run`` themselves; this only
-    ensures a test which forgets cannot disturb the live scheduler.
+    ensures a test which forgets cannot disturb the live scheduler. The name is
+    matched anywhere in the argument list, not just at the front, so a wrapped
+    invocation such as ``["sudo", "launchctl", ...]`` is caught too.
     """
     real_run = core.run
 
     def guarded(argv, **kwargs):
-        if argv[:1] == ["launchctl"]:
+        if "launchctl" in argv:
             return type("Result", (), {"stdout": "", "stderr": "", "returncode": 0})()
         return real_run(argv, **kwargs)
 

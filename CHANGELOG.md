@@ -10,8 +10,55 @@ releases, and breaking changes are noted explicitly.
 
 ## [Unreleased]
 
+### Added
+
+- `clamshell reconcile` re-aligns a pending session after a restart: a trigger
+  still in the future is re-armed with the remaining time, and one that already
+  passed restores sleep instead of leaving it disabled forever. The menu bar app
+  runs it at launch.
+- `clamshell status --json` and `clamshell battery --json` emit machine-readable
+  state. The menu bar app now reads the JSON form, falling back to the text
+  parser for an older CLI.
+- `clamshell darken` blanks the display on demand, so the menu bar toggle also
+  applies to a session that is already running.
+- The menu bar app remembers the chosen battery floor, duration, custom span and
+  display toggle across launches.
+- `clamshell on` now always starts the session watcher, including for an
+  unlimited session with no time limit and no battery floor. The watcher is what
+  keeps the built-in panel dark for a shut lid, and an unlimited session is
+  re-armed by `clamshell reconcile` after a restart.
+
 ### Fixed
 
+- The built-in display is now blanked when the lid closes. With sleep disabled
+  macOS does not do this on its own: the idle display timer normally handles it,
+  and on battery that timer is off, so a shut lid could leave the panel lit. The
+  session watcher blanks it again on every pass, and skips that when an external
+  display is attached or any probe fails.
+- `clamshell off` restores sleep before cancelling the timer. Cancelling first
+  could leave sleep disabled with no trigger and no state file to recover from.
+- The watcher no longer discards a failed restore: it retries, logs to
+  `~/Library/Logs/clamshell.log`, and keeps the state file so a refused `sudo`
+  cannot let the battery drain unnoticed.
+- A duration longer than 30 days is rejected by the CLI, matching the limit the
+  menu bar app already enforced, so a stray digit cannot schedule a session years
+  out.
+- The menu bar no longer crashes with `NSInternalInconsistencyException` when the
+  status menu is rebuilt while it is still installed — for example after picking a
+  custom battery floor. The state row is created per build, like every other item.
+- The menu now checks the duration that is actually running, and nothing is
+  checked when a custom span is in use.
+- A command that times out keeps the child's stderr in the error message, so a
+  Python traceback is no longer replaced by a bare "timed out". The text is
+  truncated, so a runaway log cannot bloat the alert.
+- The helper keeps logging when a rotation step fails: under `set -e` a failing
+  `chmod`/`mv` could abort it before the current action was recorded.
+- The version test now compares both `Info.plist` keys through `plistlib`, so a
+  bundle whose two version strings drifted apart is caught instead of passing on
+  a substring match.
+- `ui/build.sh` names the real problem when an earlier `sudo` install left a
+  root-owned bundle behind, instead of failing with a bare permission error, and
+  no longer hides `swiftformat` output.
 - The menu bar app no longer hangs for the full command timeout when the CLI
   writes more than the ~64 KiB pipe buffer. Output is drained on background
   queues, and a timed-out child is terminated, then killed if it refuses to exit.
@@ -26,6 +73,12 @@ releases, and breaking changes are noted explicitly.
   holds the output pipe open, so the app can never wait forever on a reader.
 - `package.sh` fails with a clear message when the version cannot be read and
   ships only the known modules instead of every `clamshell_*.py`.
+
+### Documentation
+
+- README states the current version, documents the helper log and state-file
+  paths, and no longer implies the helper copy under
+  `~/Library/Application Support/clamshell/` is what runs as root.
 
 ## [0.2.0] - 2026-10-18
 

@@ -7,7 +7,7 @@ This is the feature macOS calls **clamshell mode** or **closed-display mode**:
 it keeps the Mac awake and prevents sleep when the lid shuts, instead of
 suspending to disk.
 
-**Status: pre-release (0.1.0).** The core behaviour is usable, but the command
+**Status: pre-release (0.2.0).** The core behaviour is usable, but the command
 interface is not yet frozen while the major version is `0`.
 
 macOS sleeps as soon as the lid closes unless sleep is explicitly disabled.
@@ -28,7 +28,7 @@ and no general root access is granted.
 | `clamshell_battery.py` | Battery level reporting and floor validation |
 | `clamshell_privileged.py` | Privileged installation and uninstall helpers |
 | `clamshell_helper.sh` | Root-owned helper; accepts only `on` / `off` |
-| `clamshell_timer.sh` | Auto-restore watcher; watches the deadline and battery floor |
+| `clamshell_timer.sh` | Session watcher; watches the deadline, battery floor and the shut lid |
 | `ui/` | Swift menu bar app driving the same CLI |
 
 ## Requirements
@@ -52,6 +52,11 @@ follow the installer. It needs one administrator password, then installs:
 | `/usr/local/sbin/clamshell-helper` | Root-owned helper; accepts only `on` / `off` |
 | `/etc/sudoers.d/clamshell` | `NOPASSWD` rule scoped to that helper only |
 | `/usr/local/bin/clamshell` | Launcher on `PATH` |
+| `/var/log/clamshell-helper.log` | Helper log, trimmed automatically when it grows |
+
+While a session runs, the pending trigger is stored at
+`~/Library/Application Support/clamshell/state.plist`; deleting that file (or
+running `clamshell off`) clears the timer.
 
 The package is not notarised, so the first launch may need
 **System Settings → Privacy & Security → Open Anyway**.
@@ -67,8 +72,11 @@ One GUI admin prompt installs the same helper, sudoers rule and `PATH` launcher.
 The Python sources, both shell scripts and a second launcher are also copied to
 `~/Library/Application Support/clamshell/`. That directory needs no privileges
 and stays readable by the sandboxed menu bar app, which cannot read protected
-folders such as `~/Documents`. Because the helper is copied there too,
-`clamshell install` can be re-run from the installed command on its own.
+folders such as `~/Documents`. A copy of the helper script lands there as well,
+but only as a source: what `sudo` runs is always the root-owned
+`/usr/local/sbin/clamshell-helper` named in the sudoers rule, and the copy in the
+support directory is never executed with privileges. Keeping it lets
+`clamshell install` be re-run from the installed command on its own.
 
 ## Usage
 
@@ -80,10 +88,19 @@ clamshell on --for 4h --battery 20   # whichever trigger fires first
 clamshell on --darken           # also blank the display now
 clamshell off                   # restore normal sleep behaviour
 clamshell status                # show state and pending triggers
+clamshell status --json         # same facts as JSON, for scripts
 clamshell battery               # show battery level and the configured floor
+clamshell darken                # blank the display now, mid-session
+clamshell reconcile             # re-align a timer left over from a restart
 ```
 
-Duration spans accept `s`, `m`, `h`, `d` and combinations: `45m`, `2h`, `1h30m`.
+Duration spans accept `s`, `m`, `h`, `d` and combinations: `45m`, `2h`, `1h30m`,
+up to a maximum of 30 days.
+
+If the machine restarts while a session is pending, the transient watcher job is
+gone but the state file remains. The menu bar app calls `clamshell reconcile` at
+launch: a trigger still in the future is re-armed with the time that is left, and
+one that already passed restores sleep instead of leaving it disabled.
 
 ## Install the menu bar app
 
@@ -119,22 +136,40 @@ the menu instead of failing silently.
 
 ## How auto-restore works
 
-`clamshell on` with a trigger schedules a transient `launchctl` job that runs
-`clamshell_timer.sh`. The watcher checks every 20 seconds and restores sleep
-when either the deadline passes or, while running unplugged, the battery drops
-to the configured floor. It then calls the helper's `off` action through the
-same sudoers rule and clears the state file. No second prompt appears.
+`clamshell on` starts a transient `launchctl` job that runs `clamshell_timer.sh`
+for as long as the session lasts, including an unlimited one. The watcher checks
+every 20 seconds and restores sleep when either the deadline passes or, while
+running unplugged, the battery drops to the configured floor. It then calls the
+helper's `off` action through the same sudoers rule and clears the state file. No
+second prompt appears.
 
 The battery floor only applies on battery power: while plugged in the charge is
 not draining, so a low reading never cuts a session short.
 
+## Keeping the display off
+
+With sleep disabled macOS does **not** blank the built-in panel when the lid
+closes: the idle display timer is what normally does that, and on battery that
+timer is off entirely (`displaysleep 0`), so the screen can stay lit behind a
+shut lid.
+
+The watcher therefore blanks the panel itself on every pass, using
+`pmset displaysleepnow` (no root), whenever all three hold:
+
+- the lid is shut,
+- the built-in panel is still lit,
+- no external display is attached.
+
+Closing the lid with an external screen connected leaves that screen running, as
+clamshell mode is supposed to. Every probe fails safe: if the lid state, the
+display list or the power state cannot be read, the screen is left alone.
+
 ## Notes
 
-- Closing the lid normally blanks the built-in display on its own; the machine
-  then runs headless until you open it again. If a setup keeps the panel lit,
-  `clamshell on --darken` blanks it explicitly with `pmset displaysleepnow`,
-  which needs no root. It is opt-in so a session started with the lid open is
-  not darkened unexpectedly.
+- Closing the lid blanks the built-in display: the watcher does it, because
+  macOS skips it once sleep is disabled. `clamshell on --darken` (or
+  `clamshell darken` mid-session) blanks it immediately, which is useful for a
+  session started with the lid already open.
 - Thermal limits still apply: sustained heavy load with the lid closed can
   throttle the CPU.
 - `clamshell uninstall` restores sleep even if the helper is already missing.

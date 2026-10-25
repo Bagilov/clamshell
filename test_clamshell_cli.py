@@ -6,7 +6,9 @@ exercise argument parsing and command dispatch without touching the system.
 
 from __future__ import annotations
 
+import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,8 @@ import clamshell_core as core
 from clamshell_battery import BatteryState
 
 MISSING_COMMAND_EXIT = 2
+FLOOR_PERCENT = 30
+DEADLINE_SECONDS = 600
 
 
 @pytest.fixture
@@ -37,6 +41,22 @@ def test_on_without_triggers_toggles_helper(stubbed: dict) -> None:
     assert cli.main(["on"]) == 0
     assert stubbed["toggled"] == [["True"]]
     assert stubbed["sleep"] == []
+
+
+def test_on_without_triggers_starts_the_watcher(
+    stubbed: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unlimited session still starts a watcher.
+
+    It is the only thing that keeps the built-in panel dark for a shut lid, so
+    a session with no trigger must not skip it.
+    """
+    monkeypatch.setattr(core, "STATE_PATH", tmp_path / "state.plist")
+    monkeypatch.setattr(core, "TIMER_SCRIPT", tmp_path / core.TIMER_NAME)
+    assert cli.main(["on"]) == 0
+    submitted = next(c for c in stubbed["run"] if c[:2] == ["launchctl", "submit"])
+    assert submitted[:5] == ["launchctl", "submit", "-l", core.TIMER_LABEL, "--"]
+    assert core.read_state().watching is True
 
 
 def test_on_with_darken_calls_sleep_display(stubbed: dict) -> None:
@@ -87,6 +107,72 @@ def test_off_cancels_timer_and_restores_sleep(
     assert removed
 
 
+def test_off_keeps_the_timer_when_restoring_sleep_fails(
+    stubbed: dict, tmp_path: Path, monkeypatch
+) -> None:
+    """A failed restore must not cancel the trigger that could still save it.
+
+    Cancelling first would leave sleep disabled with nothing scheduled, so the
+    battery could drain with no recovery path.
+    """
+
+    def refuse(_enabled: bool) -> None:
+        raise core.ClamshellError("sudo refused")
+
+    monkeypatch.setattr(core, "STATE_PATH", tmp_path / "state.plist")
+    core.write_state(int(time.time()) + 600)
+    monkeypatch.setattr(cli, "helper_toggle", refuse)
+    assert cli.main(["off"]) == 1
+    assert core.read_state().deadline is not None, "the trigger must survive"
+
+
+def test_status_json_is_machine_readable(
+    stubbed: dict, tmp_path: Path, monkeypatch, capsys
+) -> None:
+    state = tmp_path / "state.plist"
+    monkeypatch.setattr(core, "STATE_PATH", state)
+    monkeypatch.setattr(cli, "sleep_disabled", lambda: True)
+    core.write_state(int(time.time()) + DEADLINE_SECONDS, FLOOR_PERCENT)
+    assert cli.main(["status", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["disabled"] is True
+    assert payload["floor"] == FLOOR_PERCENT
+    assert 0 < payload["remainingSeconds"] <= DEADLINE_SECONDS
+
+
+def test_status_text_stays_the_default(
+    stubbed: dict, tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """The JSON flag must not change the human-readable default."""
+    monkeypatch.setattr(core, "STATE_PATH", tmp_path / "state.plist")
+    monkeypatch.setattr(cli, "sleep_disabled", lambda: False)
+    assert cli.main(["status"]) == 0
+    assert "Sleep is enabled" in capsys.readouterr().out
+
+
+def test_battery_json_reports_no_battery(stubbed: dict, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli, "battery_state", lambda: None)
+    assert cli.main(["battery", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["percent"] is None
+    assert payload["onBattery"] is None
+
+
+def test_reconcile_reports_a_running_watcher(
+    stubbed: dict, tmp_path: Path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setattr(core, "STATE_PATH", tmp_path / "state.plist")
+    monkeypatch.setattr(core, "timer_job_running", lambda: True)
+    core.write_state(int(time.time()) + DEADLINE_SECONDS)
+    assert cli.main(["reconcile"]) == 0
+    assert "running" in capsys.readouterr().out
+
+
+def test_darken_blanks_the_display(stubbed: dict) -> None:
+    assert cli.main(["darken"]) == 0
+    assert stubbed["sleep"] == [["sleep"]]
+
+
 def test_status_reports_enabled_without_triggers(
     stubbed: dict, tmp_path: Path, monkeypatch
 ) -> None:
@@ -101,7 +187,7 @@ def test_status_reports_active_with_deadline(
     state = tmp_path / "state.plist"
     monkeypatch.setattr(core, "STATE_PATH", state)
     monkeypatch.setattr(cli, "sleep_disabled", lambda: True)
-    core.write_state(int(__import__("time").time()) + 600)
+    core.write_state(int(time.time()) + 600)
     assert cli.main(["status"]) == 0
 
 
@@ -127,7 +213,7 @@ def test_status_warns_about_reached_floor_even_with_deadline(
     monkeypatch.setattr(
         cli, "battery_state", lambda: BatteryState(percent=10, on_battery=True)
     )
-    core.write_state(int(__import__("time").time()) + 3600, 50)
+    core.write_state(int(time.time()) + 3600, 50)
     assert cli.main(["status"]) == 0
     assert "Battery floor reached" in capsys.readouterr().out
 
