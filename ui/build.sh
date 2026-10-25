@@ -27,7 +27,9 @@ fi
 step() { printf '\n==> %s\n' "$*"; }
 
 step "Running lint and tests"
-(cd "$UI_DIR" && swiftformat --lint . >/dev/null)
+# Lint output is kept: under `set -e` a formatting failure ends the script, and
+# suppressing the report would leave the developer without the offending file.
+(cd "$UI_DIR" && swiftformat --lint .)
 (cd "$UI_DIR" && ${LINT_ENV[@]+"${LINT_ENV[@]}"} swiftlint --strict --quiet)
 (cd "$UI_DIR" && swift test ${TEST_PLUGIN_ARGS[@]+"${TEST_PLUGIN_ARGS[@]}"})
 
@@ -63,6 +65,15 @@ if [[ "${1:-}" != "--install" ]]; then
 fi
 
 step "Installing to $DESTINATION"
+# /Applications is group-writable by admins, so no sudo is needed for a normal
+# user. A copy left by an earlier `sudo` run is root-owned, though, and that is
+# the one case worth naming instead of failing with a bare "Permission denied".
+if [[ -e "$DESTINATION" && ! -w "$DESTINATION" ]]; then
+    printf 'Cannot replace %s: it is not writable by the current user.\n' "$DESTINATION" >&2
+    printf 'It looks like an earlier install was run with sudo; remove it, e.g.:\n' >&2
+    printf '  sudo rm -rf %s\n' "$DESTINATION" >&2
+    exit 1
+fi
 rm -rf "$DESTINATION"
 cp -R "$APP_BUNDLE" "$DESTINATION"
 printf '\nInstalled %s\nLaunch it from Launchpad or: open -a %s\n' "$DESTINATION" "$APP_NAME"

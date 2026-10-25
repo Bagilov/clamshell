@@ -157,9 +157,13 @@ public struct ClamshellCommand: Sendable {
                 exitSignal.wait()
             }
             Self.finishReading(captures, readers: readers)
+            // Whatever the child printed before hanging is the whole point of
+            // draining the pipes, so keep it in the timeout detail.
+            let partial = Self.excerpt(captures[1].text)
+            let base = "timed out after \(Int(timeout))s"
             throw ClamshellError.commandFailed(
                 command: joined(arguments),
-                detail: "timed out after \(Int(timeout))s"
+                detail: partial.isEmpty ? base : "\(base): \(partial)"
             )
         }
         Self.finishReading(captures, readers: readers)
@@ -169,19 +173,44 @@ public struct ClamshellCommand: Sendable {
         guard process.terminationStatus == 0 else {
             throw ClamshellError.commandFailed(
                 command: joined(arguments),
-                detail: err.isEmpty ? out : err
+                detail: Self.excerpt(err.isEmpty ? out : err)
             )
         }
         return out
     }
 
     /// Read the current status reported by the CLI.
+    ///
+    /// Prefers the `--json` form, which does not depend on the wording of the
+    /// human-readable output. Falls back to the text parser for an older CLI
+    /// that predates the flag, so an app update cannot break a pending session.
     public func status() throws -> ClamshellStatus {
+        if let status = try? jsonStatus() {
+            return status
+        }
         let output = try run(["status"])
         guard let status = StatusParser.parse(output) else {
             throw ClamshellError.commandFailed(command: "status", detail: "unrecognised output")
         }
         return status
+    }
+
+    /// Decode `clamshell status --json`.
+    private func jsonStatus() throws -> ClamshellStatus {
+        let output = try run(["status", "--json"])
+        guard let data = output.data(using: .utf8) else {
+            throw ClamshellError.commandFailed(command: "status", detail: "unreadable output")
+        }
+        return try JSONDecoder().decode(ClamshellStatus.self, from: data)
+    }
+
+    /// Re-align a leftover timer with reality, called once at app launch.
+    ///
+    /// The watcher is a transient job, so after a reboot sleep could be left
+    /// disabled with nothing scheduled. Failure is not fatal: the menu still
+    /// shows the state reported by `status`.
+    public func reconcile() throws {
+        _ = try run(["reconcile"])
     }
 
     /// Disable sleep, optionally scheduling automatic restore triggers.
@@ -251,8 +280,29 @@ public struct ClamshellCommand: Sendable {
         _ = try run(["off"])
     }
 
+    /// Blank the display now, for a session that is already running.
+    ///
+    /// `--darken` only takes effect when a session starts, so toggling it mid-run
+    /// would otherwise change the menu without changing anything on screen.
+    /// Delegates to the CLI, which keeps this app off `pmset` directly.
+    public func darkenNow() throws {
+        _ = try run(["darken"])
+    }
+
     private func joined(_ arguments: [String]) -> String {
         (["clamshell"] + arguments).joined(separator: " ")
+    }
+
+    /// Longest child output kept in an error message.
+    private static let detailLimit = 2000
+
+    /// Trim child output to a length that is useful in an alert.
+    ///
+    /// A hung or verbose CLI can emit far more than fits a dialog or a log line,
+    /// so only the head is kept and the truncation is made visible.
+    private static func excerpt(_ text: String) -> String {
+        guard text.count > detailLimit else { return text }
+        return String(text.prefix(detailLimit)) + "… (truncated)"
     }
 
     /// Wait for the reader queues, forcing `drain()` to stop if they stall.

@@ -12,5 +12,10 @@ let package = Package(
         .target(name: "ClamshellCore"),
         .executableTarget(name: "Clamshell", dependencies: ["ClamshellCore"]),
         .testTarget(name: "ClamshellCoreTests", dependencies: ["ClamshellCore"]),
+        .testTarget(
+            name: "ClamshellUITests",
+            dependencies: ["Clamshell", "ClamshellCore"],
+            path: "Tests/ClamshellUITests"
+        ),
     ]
 )

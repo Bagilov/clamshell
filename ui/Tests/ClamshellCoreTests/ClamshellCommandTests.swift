@@ -112,6 +112,46 @@ struct ClamshellCommandTests {
         #expect(Date().timeIntervalSince(start) < 30)
     }
 
+    @Test("Keeps the child's stderr in the timeout message")
+    func timeoutIncludesStderr() throws {
+        // The whole point of draining the pipes is to surface why the CLI hung,
+        // so its diagnostics have to reach the error, not just "timed out".
+        let script = try makeScript("""
+        #!/bin/sh
+        echo 'Traceback: something exploded' >&2
+        sleep 600
+        """)
+        let command = ClamshellCommand(path: script.path, timeout: 1)
+        do {
+            _ = try command.run([])
+            Issue.record("expected the run to time out")
+        } catch let error as ClamshellError {
+            let detail = "\(error)"
+            #expect(detail.contains("timed out after 1s"))
+            #expect(detail.contains("Traceback: something exploded"))
+        }
+    }
+
+    @Test("Truncates a very large error body instead of carrying it whole")
+    func truncatesHugeErrorBody() throws {
+        // A hung CLI can dump far more than a dialog can show; the error must
+        // stay bounded while still carrying the head of the output.
+        let script = try makeScript("""
+        #!/bin/sh
+        head -c 200000 /dev/zero | tr '\\0' 'x' >&2
+        sleep 600
+        """)
+        let command = ClamshellCommand(path: script.path, timeout: 1)
+        do {
+            _ = try command.run([])
+            Issue.record("expected the run to time out")
+        } catch let error as ClamshellError {
+            let detail = "\(error)"
+            #expect(detail.contains("(truncated)"))
+            #expect(detail.count < 5000)
+        }
+    }
+
     /// Write an executable shell script into a unique temporary directory.
     private func makeScript(_ body: String) throws -> URL {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())

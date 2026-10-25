@@ -21,14 +21,19 @@ final class MenuBarController: NSObject, MenuActions {
     private var isWorking = false
     private var awaitingExpiryRefresh = false
 
+    /// Last choices, restored on the next launch so they are not re-picked.
+    private let preferences = Preferences()
+
     private var menuBuilder = MenuBuilder()
     private var activity: NSObjectProtocol?
     private var menuDelegate: MenuOpenObserver?
 
     func applicationDidFinishLaunching(_: Notification) {
+        restorePreferences()
         buildMenu()
         render()
         refresh()
+        reconcileAfterRestart()
         // App Nap throttles timers in a background accessory app, so opt out of
         // napping via AppNapPolicy, which deliberately does not block sleep.
         activity = ProcessInfo.processInfo.beginActivity(
@@ -39,11 +44,15 @@ final class MenuBarController: NSObject, MenuActions {
         // second from the local deadline so it looks live without shelling out.
         // Both timers also join the common run loop mode, because an open menu
         // switches the loop to tracking mode where only common timers fire.
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+        // Previous timers are dropped first so a repeated launch cannot leave
+        // two of each running.
+        refreshTimer?.invalidate()
+        tickTimer?.invalidate()
+        refreshTimer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
         }
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.render() }
+        tickTimer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.render() }
         }
         for timer in [refreshTimer, tickTimer] {
             guard let timer else { continue }
@@ -59,11 +68,41 @@ final class MenuBarController: NSObject, MenuActions {
         }
     }
 
+    deinit {
+        // The run loop holds the timers, so a controller that goes away before
+        // termination must take them with it rather than leave idle ticks behind.
+        refreshTimer?.invalidate()
+        tickTimer?.invalidate()
+    }
+
+    /// Load the last saved choices before the first render.
+    private func restorePreferences() {
+        batteryFloor = preferences.batteryFloor
+        selectedDuration = preferences.duration
+        customSpan = preferences.customSpan
+        darkenDisplay = preferences.darken
+    }
+
+    /// Persist the choices that should survive a relaunch.
+    private func savePreferences() {
+        preferences.batteryFloor = batteryFloor
+        preferences.duration = selectedDuration
+        preferences.customSpan = customSpan
+        preferences.darken = darkenDisplay
+    }
+
+    /// Re-align a watcher left over from before a reboot, once, in the
+    /// background: sleep may be disabled with nothing scheduled to restore it.
+    private func reconcileAfterRestart() {
+        RestartReconciler(command: command).run()
+    }
+
     private func buildMenu() {
         let menu = menuBuilder.buildMenu(
             target: self,
             command: command,
             floor: batteryFloor,
+            duration: customSpan == nil ? selectedDuration : nil,
             darken: darkenDisplay
         )
         statusItem.menu = menu
@@ -78,7 +117,11 @@ final class MenuBarController: NSObject, MenuActions {
     private func rebuildMenu() {
         buildMenu()
     }
+}
 
+/// Menu actions: session control, selections and app commands.
+@MainActor
+extension MenuBarController {
     @objc func refresh() {
         guard !isWorking else { return }
         Task { @MainActor in
@@ -91,6 +134,8 @@ final class MenuBarController: NSObject, MenuActions {
         guard let option = sender.representedObject as? DurationOption else { return }
         selectedDuration = option
         customSpan = nil
+        savePreferences()
+        markDurationSelection()
         perform {
             try self.command.enable(
                 duration: option,
@@ -117,6 +162,7 @@ final class MenuBarController: NSObject, MenuActions {
             return
         }
         customSpan = span
+        savePreferences()
         perform {
             try self.command.enable(
                 span: span,
@@ -148,10 +194,16 @@ final class MenuBarController: NSObject, MenuActions {
         applyFloor(floor)
     }
 
-    /// Toggle whether starting a session also blanks the display.
+    /// Toggle whether a session blanks the display.
+    ///
+    /// When a session is already running the toggle takes effect immediately,
+    /// so the menu does not claim something the screen does not show.
     @objc func toggleDarken() {
         darkenDisplay.toggle()
+        savePreferences()
         menuBuilder.darkenItem.state = darkenDisplay ? .on : .off
+        guard darkenDisplay, status.isDisabled else { return }
+        perform { try self.command.darkenNow() }
     }
 
     @objc func selectFloor(_ sender: NSMenuItem) {
@@ -170,20 +222,19 @@ final class MenuBarController: NSObject, MenuActions {
         perform { try self.command.enable(span: span, floorPercent: floor.percent) }
     }
 
+    /// Tick the duration row matching the stored selection.
+    private func markDurationSelection() {
+        menuBuilder.markDurationSelection(customSpan == nil ? selectedDuration : nil)
+    }
+
     /// Tick the floor row matching the stored selection.
     ///
     /// A custom value has no preset row, so a matching row is added first;
     /// otherwise the menu would show no selection at all.
     private func markFloorSelection() {
-        let hasRow = menuBuilder.floorItems.contains { item in
-            (item.representedObject as? BatteryFloor) == batteryFloor
-        }
-        guard hasRow else {
+        guard menuBuilder.markFloorSelection(batteryFloor) else {
             rebuildMenu()
             return
-        }
-        for item in menuBuilder.floorItems {
-            item.state = (item.representedObject as? BatteryFloor) == batteryFloor ? .on : .off
         }
     }
 
