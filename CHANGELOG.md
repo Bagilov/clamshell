@@ -10,6 +10,8 @@ releases, and breaking changes are noted explicitly.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-28
+
 ### Added
 
 - `clamshell reconcile` re-aligns a pending session after a restart: a trigger
@@ -126,7 +128,8 @@ not yet frozen.
   display toggle and surfaced CLI errors.
 - `--version`, and bundle/version consistency checks.
 
-[Unreleased]: https://github.com/Bagilov/clamshell/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Bagilov/clamshell/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Bagilov/clamshell/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Bagilov/clamshell/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Bagilov/clamshell/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Bagilov/clamshell/releases/tag/v0.1.0

@@ -7,7 +7,7 @@ This is the feature macOS calls **clamshell mode** or **closed-display mode**:
 it keeps the Mac awake and prevents sleep when the lid shuts, instead of
 suspending to disk.
 
-**Status: pre-release (0.2.0).** The core behaviour is usable, but the command
+**Status: pre-release (0.3.0).** The core behaviour is usable, but the command
 interface is not yet frozen while the major version is `0`.
 
 macOS sleeps as soon as the lid closes unless sleep is explicitly disabled.

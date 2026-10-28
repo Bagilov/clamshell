@@ -48,7 +48,7 @@ MAX_DURATION_SECONDS = 30 * 86400
 
 #: Project version, following semantic versioning. Major zero marks the current
 #: pre-release line: the interface may still change between minor releases.
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 _SPAN_RE = re.compile(r"(\d+)([smhd])")
 _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
