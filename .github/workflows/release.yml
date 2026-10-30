@@ -23,15 +23,20 @@ jobs:
       - name: Show toolchain
         run: swift --version
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
       - name: Install linters
         run: brew install swiftlint swiftformat shellcheck
 
       - name: Python lint and tests
         run: |
-          python3 -m pip install --upgrade pip ruff pytest
+          python -m pip install --upgrade pip
+          python -m pip install ruff pytest
           ruff check .
           ruff format --check .
-          python3 -m pytest -q
+          python -m pytest -q
           bash clamshell_timer_test.sh
           bash clamshell_helper_test.sh
           shellcheck clamshell_helper.sh clamshell_helper_test.sh clamshell_timer.sh \
