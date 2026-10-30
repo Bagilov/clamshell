@@ -88,6 +88,30 @@ enum Prompt {
         return alert.runModal() == .alertFirstButtonReturn
     }
 
+    /// Ask the user to confirm removing the installation.
+    ///
+    /// The wording is deliberate: it names what disappears, because uninstalling
+    /// deletes the root-owned helper, the sudoers rule and the CLI without an
+    /// obvious way to undo. The default button is "Cancel", so the destructive
+    /// choice needs a second click or the arrow keys.
+    ///
+    /// - Returns: `true` when the user chose to uninstall.
+    static func confirmUninstall() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Uninstall Clamshell?"
+        alert.informativeText =
+            "This removes the helper, the sudoers rule and the clamshell command, "
+                + "and restores normal sleep. The app bundle stays until you move "
+                + "it to the Trash."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Uninstall")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        // Button one is Cancel, so any return other than the first button means
+        // the user picked Uninstall.
+        return alert.runModal() != .alertFirstButtonReturn
+    }
+
     /// Report a failure from a background action, such as a CLI error.
     ///
     /// Activating first matters for an accessory app: with no key window the

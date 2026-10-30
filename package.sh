@@ -15,6 +15,20 @@ BUILD_DIR="$REPO_DIR/build"
 APP_NAME="Clamshell"
 PKG_ID="io.github.bagilov.clamshell"
 
+# Signing the product package is desirable but optional: without a Developer ID
+# Installer certificate the build still succeeds, and CI passes --unsigned so a
+# missing certificate is an explicit choice rather than a silent skip.
+UNSIGNED=0
+for arg in "$@"; do
+    case "$arg" in
+        --unsigned) UNSIGNED=1 ;;
+        *)
+            printf 'unknown argument: %s\n' "$arg" >&2
+            exit 2
+            ;;
+    esac
+done
+
 step() { printf '\n==> %s\n' "$*"; }
 
 VERSION="$(python3 - "$REPO_DIR/clamshell_core.py" <<'PY'
@@ -127,7 +141,20 @@ cat > "$DIST" <<XML
 </installer-gui-script>
 XML
 
-productbuild --distribution "$DIST" --package-path "$BUILD_DIR" "$PKG"
+SIGN_ARGS=()
+if (( UNSIGNED == 0 )); then
+    identity="$(security find-identity -v -p basic 2>/dev/null \
+        | sed -nE 's/.*"(Developer ID Installer: [^"]+)".*/\1/p' | head -1)"
+    if [[ -n "$identity" ]]; then
+        SIGN_ARGS=(--sign "$identity")
+        step "Signing the package as $identity"
+    else
+        printf 'No Developer ID Installer certificate found; building unsigned.\n'
+    fi
+fi
+
+productbuild --distribution "$DIST" --package-path "$BUILD_DIR" \
+    ${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"} "$PKG"
 
 step "Result"
 printf 'Built %s\n' "$PKG"

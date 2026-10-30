@@ -149,22 +149,49 @@ stub_helper_fail() { sudo() { return 1; }; }
 stub_helper_ok() { sudo() { return 0; }; }
 stub_launchctl() { launchctl() { return 0; }; }
 
+# Notifications go through a stub: a real osascript call during tests would post
+# a visible banner and make the suite non-hermetic. The stub is reached through
+# $OSASCRIPT from the sourced watcher, so it records whatever it is called with.
+NOTIFY_LOG="$WORK/notify.log"
+stub_osascript() { printf '%s\n' "$@" >> "$NOTIFY_LOG"; }
+OSASCRIPT=stub_osascript
+
 stub_helper_fail
 stub_launchctl
 restore_sleep
 assert_eq "$?" "2" "a failed restore asks for a retry"
 assert_true "[[ -f '$STATE' ]]" "a failed restore keeps the state file"
+assert_true "[[ ! -s '$NOTIFY_LOG' ]]" "a retryable failure stays silent"
 
 ATTEMPTS=2
+rm -f "$NOTIFY_LOG"
 restore_sleep
 assert_eq "$?" "1" "the retry budget eventually gives up"
 assert_true "[[ -f '$STATE' ]]" "giving up still keeps the state file"
+assert_true "grep -q 'Could not restore sleep' '$NOTIFY_LOG'" "giving up posts a notification"
 
 stub_helper_ok
 ATTEMPTS=0
-restore_sleep
+rm -f "$NOTIFY_LOG"
+restore_sleep "battery reached 15%"
 assert_eq "$?" "0" "a successful restore reports success"
 assert_true "[[ ! -f '$STATE' ]]" "a successful restore clears the state file"
+assert_true "grep -q 'battery reached 15%' '$NOTIFY_LOG'" "a successful restore names the reason"
+
+# The notification is suppressed entirely when NOTIFY=0.
+NOTIFY=0
+rm -f "$NOTIFY_LOG"
+: > "$STATE"
+restore_sleep "the timer finished"
+assert_true "[[ ! -s '$NOTIFY_LOG' ]]" "NOTIFY=0 keeps the watcher silent"
+NOTIFY=1
+
+# end_reason reports the floor when it triggered, and the timer otherwise.
+STUB_BATT="$BATTERY_LOW"
+FLOOR=20
+assert_eq "$(end_reason)" "battery reached 15%" "the floor is named when it triggered"
+FLOOR=0
+assert_eq "$(end_reason)" "the timer finished" "the timer is named without a floor"
 
 if (( FAILURES > 0 )); then
     printf '\n%d check(s) failed\n' "$FAILURES"

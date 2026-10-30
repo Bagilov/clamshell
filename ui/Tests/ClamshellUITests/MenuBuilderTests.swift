@@ -152,4 +152,51 @@ struct MenuBuilderTests {
         #expect(builder.checkUpdatesItem.menu === menu)
         #expect(builder.checkUpdatesItem.title == "Check for Updates…")
     }
+
+    @Test("Shows the login row only when the app can register it")
+    func loginRowOnlyWhenAvailable() {
+        var builder = MenuBuilder()
+        let command = ClamshellCommand(path: "/usr/local/bin/clamshell", timeout: 1)
+
+        let available = builder.buildMenu(
+            target: NSObject(),
+            command: command,
+            floor: .off,
+            duration: .indefinite,
+            darken: false,
+            launchAtLogin: true,
+            canLaunchAtLogin: true
+        )
+        #expect(builder.loginItem.menu === available)
+        #expect(builder.loginItem.title == "Launch at Login")
+        #expect(builder.loginItem.state == .on)
+
+        // An unbundled binary must not offer a row that every click would reject.
+        let unavailable = builder.buildMenu(
+            target: NSObject(),
+            command: command,
+            floor: .off,
+            duration: .indefinite,
+            darken: false,
+            launchAtLogin: false,
+            canLaunchAtLogin: false
+        )
+        #expect(unavailable.items.contains(builder.loginItem) == false)
+    }
+
+    @Test("Offers an uninstall row that opens a confirmation")
+    func uninstallRowPresent() {
+        var builder = MenuBuilder()
+        let command = ClamshellCommand(path: "/usr/local/bin/clamshell", timeout: 1)
+        let menu = builder.buildMenu(
+            target: NSObject(),
+            command: command,
+            floor: .off,
+            duration: .indefinite,
+            darken: false
+        )
+        let uninstall = menu.items.first { $0.title == "Uninstall Clamshell…" }
+        #expect(uninstall != nil)
+        #expect(uninstall?.action == #selector(MenuActions.uninstall))
+    }
 }

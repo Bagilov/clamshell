@@ -30,6 +30,9 @@ final class MenuBarController: NSObject, MenuActions {
     /// Internal so the update extension can drive and read the checker.
     lazy var updates = UpdateChecker(command: command)
 
+    /// Login-item registration, read and written by the app actions extension.
+    let loginItemService = LoginItem()
+
     private var menuBuilder = MenuBuilder()
     private var activity: NSObjectProtocol?
     private var menuDelegate: MenuOpenObserver?
@@ -119,6 +122,8 @@ final class MenuBarController: NSObject, MenuActions {
             floor: batteryFloor,
             duration: customSpan == nil ? selectedDuration : nil,
             darken: darkenDisplay,
+            launchAtLogin: launchAtLogin,
+            canLaunchAtLogin: canLaunchAtLogin,
             update: updates.status
         )
         statusItem.menu = menu
@@ -130,7 +135,10 @@ final class MenuBarController: NSObject, MenuActions {
     }
 
     /// Rebuild the menu, used when the set of floor rows changes.
-    private func rebuildMenu() {
+    ///
+    /// Internal so the app-action extension can refresh the login-item tick
+    /// after a registration change.
+    func rebuildMenu() {
         buildMenu()
     }
 }

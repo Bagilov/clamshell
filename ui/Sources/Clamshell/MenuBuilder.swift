@@ -19,6 +19,8 @@ struct MenuBuilder {
     private(set) var floorItems: [NSMenuItem] = []
     /// The toggle that blanks the display when a session starts.
     private(set) var darkenItem = NSMenuItem()
+    /// The "start at login" toggle, shown only when the app is bundled.
+    private(set) var loginItem = NSMenuItem()
     /// The "install the newer release" row, shown only when one is known.
     private(set) var updateItem = NSMenuItem()
     /// The always-present manual check row.
@@ -32,6 +34,8 @@ struct MenuBuilder {
     ///   - floor: Currently selected battery floor, for the radio state.
     ///   - duration: Preset to check, or `nil` when a custom span is running.
     ///   - darken: Whether the display toggle is currently on.
+    ///   - launchAtLogin: Whether the login item is registered, when available.
+    ///   - canLaunchAtLogin: Whether the login item can be changed at all.
     ///   - update: Known update status, used to show the install row.
     /// - Returns: The assembled menu.
     mutating func buildMenu(
@@ -40,6 +44,8 @@ struct MenuBuilder {
         floor: BatteryFloor,
         duration: DurationOption?,
         darken: Bool,
+        launchAtLogin: Bool = false,
+        canLaunchAtLogin: Bool = false,
         update: UpdateStatus? = nil
     ) -> NSMenu {
         let menu = NSMenu()
@@ -53,6 +59,12 @@ struct MenuBuilder {
         addFloorItems(to: menu, target: target, floor: floor)
         menu.addItem(.separator())
         addDisplayItem(to: menu, target: target, darken: darken)
+        addLoginItem(
+            to: menu,
+            target: target,
+            enabled: launchAtLogin,
+            available: canLaunchAtLogin
+        )
         menu.addItem(.separator())
         addUpdateItems(to: menu, target: target, update: update)
         menu.addItem(.separator())
@@ -149,6 +161,31 @@ struct MenuBuilder {
         menu.addItem(darkenItem)
     }
 
+    /// The "start at login" toggle, when the app can register one.
+    ///
+    /// Only added for a bundled app: a bare binary run from a build directory has
+    /// no bundle identifier, so `SMAppService` would reject every change and the
+    /// row would be a dead toggle.
+    private mutating func addLoginItem(
+        to menu: NSMenu,
+        target: AnyObject,
+        enabled: Bool,
+        available: Bool
+    ) {
+        guard available else {
+            loginItem = NSMenuItem()
+            return
+        }
+        loginItem = NSMenuItem(
+            title: "Launch at Login",
+            action: #selector(MenuActions.toggleLaunchAtLogin),
+            keyEquivalent: ""
+        )
+        loginItem.target = target
+        loginItem.state = enabled ? .on : .off
+        menu.addItem(loginItem)
+    }
+
     /// The update rows: install a known release, or check by hand.
     ///
     /// The install row is only added when a newer release is known, so the menu
@@ -218,6 +255,16 @@ struct MenuBuilder {
 
         menu.addItem(.separator())
 
+        let uninstall = NSMenuItem(
+            title: "Uninstall Clamshell…",
+            action: #selector(MenuActions.uninstall),
+            keyEquivalent: ""
+        )
+        uninstall.target = target
+        menu.addItem(uninstall)
+
+        menu.addItem(.separator())
+
         let quit = NSMenuItem(
             title: "Quit",
             action: #selector(MenuActions.quit),
@@ -265,6 +312,8 @@ protocol MenuActions {
     func selectFloor(_ sender: NSMenuItem)
     func selectCustomFloor()
     func toggleDarken()
+    func toggleLaunchAtLogin()
+    func uninstall()
     func stopSession()
     func refresh()
     func installUpdate()

@@ -1,0 +1,82 @@
+name: Release
+
+# Build the installer and publish it on a version tag.
+#
+# Packaging happens here rather than on a laptop so the published artifact is
+# built from the tagged commit, reproducibly, and never depends on a developer's
+# local toolchain. The workflow only runs for tags matching `v*`, so a branch
+# push can never publish a release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Build and publish the installer
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Install linters
+        run: brew install swiftlint swiftformat shellcheck
+
+      - name: Python lint and tests
+        run: |
+          python3 -m pip install --upgrade pip ruff pytest
+          ruff check .
+          ruff format --check .
+          python3 -m pytest -q
+          bash clamshell_timer_test.sh
+          bash clamshell_helper_test.sh
+          shellcheck clamshell_helper.sh clamshell_helper_test.sh clamshell_timer.sh \
+            clamshell_timer_test.sh ui/build.sh package.sh
+
+      - name: Build the package
+        run: ./package.sh --unsigned
+
+      - name: Resolve the package and its digest
+        id: package
+        run: |
+          set -euo pipefail
+          version="$(python3 - <<'PY'
+          import re
+          text = open("clamshell_core.py").read()
+          print(re.search(r'^VERSION = "([^"]+)"', text, re.M).group(1))
+          PY
+          )"
+          pkg="build/Clamshell-${version}.pkg"
+          test -f "$pkg" || { echo "missing $pkg" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "pkg=$pkg" >> "$GITHUB_OUTPUT"
+          echo "digest=$(shasum -a 256 "$pkg" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the tag matches the built version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          built="${{ steps.package.outputs.version }}"
+          if [[ "$tag" != "$built" ]]; then
+            echo "tag $GITHUB_REF_NAME does not match version $built" >&2
+            exit 1
+          fi
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            "${{ steps.package.outputs.pkg }}" \
+            --title "Clamshell ${{ steps.package.outputs.version }}" \
+            --prerelease \
+            --notes "Built from $GITHUB_SHA by CI.
+
+          \`$(basename "${{ steps.package.outputs.pkg }}")\` (sha256 \`${{ steps.package.outputs.digest }}\`) installs the CLI, the root-owned helper with its narrow sudoers rule, and the menu bar app.
+
+          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details."

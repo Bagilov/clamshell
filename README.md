@@ -7,7 +7,7 @@ This is the feature macOS calls **clamshell mode** or **closed-display mode**:
 it keeps the Mac awake and prevents sleep when the lid shuts, instead of
 suspending to disk.
 
-**Status: pre-release (0.4.0).** The core behaviour is usable, but the command
+**Status: pre-release (0.5.0).** The core behaviour is usable, but the command
 interface is not yet frozen while the major version is `0`.
 
 macOS sleeps as soon as the lid closes unless sleep is explicitly disabled.
@@ -45,8 +45,9 @@ helper, the sudoers rule and the menu bar app. See
 | `clamshell_update.py` | Throttled update check and its cache |
 | `clamshell_upgrade.py` | Download, checksum verification and install |
 | `clamshell_helper.sh` | Root-owned helper; accepts only `on` / `off` |
-| `clamshell_timer.sh` | Session watcher; watches the deadline, battery floor and the shut lid |
+| `clamshell_timer.sh` | Session watcher; watches the deadline, battery floor and the shut lid, and notifies when a session ends |
 | `ui/` | Swift menu bar app driving the same CLI |
+| `.github/workflows/release.yml` | Builds and publishes the installer when a `v*` tag is pushed |
 
 ## Requirements
 
@@ -227,16 +228,37 @@ Packaging a distributable installer:
 
 ```bash
 ./package.sh              # writes build/Clamshell-<version>.pkg
+./package.sh --unsigned   # skip signing when no certificate is present
 ```
 
 The shipped binary is built with a neutral scratch path and
-`-debug-prefix-map`, so it never embeds the builder's home directory.
+`-debug-prefix-map`, so it never embeds the builder's home directory. The
+product package is signed with a Developer ID Installer certificate when one is
+available, and built unsigned otherwise.
+
+Releases are built in CI: pushing a `v*` tag runs `.github/workflows/release.yml`,
+which lints, tests, packages, checks the tag against the version in the sources,
+and publishes the package as a release asset. A release made by hand should match
+that flow so the asset and the digest stay verifiable.
 
 The app is an accessory (`LSUIElement`): a moon glyph in the menu bar, no Dock
 icon. Its menu offers the duration choices, a "Stop on Low Battery" section with
-the battery floor levels, a "Turn Display Off" toggle, "Stop Clamshell Mode",
-"Refresh", "Check for Updates…" (with an "Update to X.Y.Z…" row when one is
-available), "About Clamshell" with the repository link, and "Quit".
+the battery floor levels, a "Turn Display Off" toggle, a "Launch at Login"
+toggle, "Stop Clamshell Mode", "Refresh", "Check for Updates…" (with an "Update
+to X.Y.Z…" row when one is available), "About Clamshell" with the repository
+link, "Uninstall Clamshell…", and "Quit".
+
+**Launch at Login** registers the app through `SMAppService`, so a reboot does
+not leave a session unmanaged: the app comes back and re-aligns any leftover
+watcher at launch. The row only appears for the installed bundle, because a bare
+binary run from a build directory has no bundle identifier to register. If macOS
+holds the registration for approval, the app says so and points at
+**System Settings → General → Login Items**.
+
+**Uninstall Clamshell…** asks for one confirmation and then removes the helper,
+the sudoers rule and the command line, and restores normal sleep. The login item
+is dropped first, so it cannot relaunch an app whose CLI is gone. The app bundle
+itself is left in place to drag to the Trash.
 
 Both the duration and the battery floor can be entered by hand through
 **Custom…**. The duration field accepts `45m`, `2h`, `1h30m` or a bare number of
@@ -258,6 +280,11 @@ every 20 seconds and restores sleep when either the deadline passes or, while
 running unplugged, the battery drops to the configured floor. It then calls the
 helper's `off` action through the same sudoers rule and clears the state file. No
 second prompt appears.
+
+When the session ends the watcher posts a notification naming the reason (the
+timer finished, or the battery reached the floor), and it notifies if a restore
+fails for good so an unattended machine is not left awake silently. Set `NOTIFY=0`
+in the watcher environment to turn notifications off.
 
 The battery floor only applies on battery power: while plugged in the charge is
 not draining, so a low reading never cuts a session short.
@@ -312,7 +339,8 @@ Python and shell:
 ruff check . && ruff format --check .
 python -m pytest -q
 bash clamshell_timer_test.sh
-shellcheck clamshell_helper.sh clamshell_timer.sh clamshell_timer_test.sh
+shellcheck clamshell_helper.sh clamshell_helper_test.sh clamshell_timer.sh \
+  clamshell_timer_test.sh ui/build.sh package.sh
 ```
 
 Swift (`ui/`):

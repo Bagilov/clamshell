@@ -10,6 +10,31 @@ releases, and breaking changes are noted explicitly.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-30
+
+### Added
+
+- **End-of-session notifications.** The watcher posts a notification when a
+  session ends and names the reason (the timer finished, or the battery reached
+  the floor), and warns when a restore fails for good so the machine is not left
+  awake unnoticed. Set `NOTIFY=0` in the environment to keep the watcher silent.
+- **Launch at Login.** The menu bar app can register itself as a login item
+  through `SMAppService`, so a reboot no longer leaves a session unmanaged. The
+  row appears only for the installed bundle, and a registration macOS is still
+  holding for approval is explained instead of silently showing as off.
+- **Uninstall from the menu.** An **Uninstall Clamshell…** row removes the
+  helper, the sudoers rule and the command line behind one confirmation, and
+  drops the login item first so it cannot relaunch an app whose CLI is gone.
+
+### Changed
+
+- `package.sh` implements the `--unsigned` flag it always documented, rejects an
+  unknown argument instead of ignoring it, and signs the product package with a
+  Developer ID Installer certificate when one is present.
+- A version tag now builds and publishes the installer from CI
+  (`.github/workflows/release.yml`), so the released package is built from the
+  tagged commit and the tag is checked against the version in the sources.
+
 ## [0.4.0] - 2026-10-30
 
 ### Added
@@ -155,7 +180,8 @@ not yet frozen.
   display toggle and surfaced CLI errors.
 - `--version`, and bundle/version consistency checks.
 
-[Unreleased]: https://github.com/Bagilov/clamshell/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Bagilov/clamshell/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Bagilov/clamshell/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Bagilov/clamshell/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Bagilov/clamshell/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Bagilov/clamshell/compare/v0.1.1...v0.2.0

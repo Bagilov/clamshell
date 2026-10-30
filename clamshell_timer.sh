@@ -21,10 +21,13 @@ PMSET=${PMSET:-/usr/bin/pmset}
 IOREG=${IOREG:-/usr/sbin/ioreg}
 SYSTEM_PROFILER=${SYSTEM_PROFILER:-/usr/sbin/system_profiler}
 HELPER=${HELPER:-/usr/local/sbin/clamshell-helper}
+OSASCRIPT=${OSASCRIPT:-/usr/bin/osascript}
 LABEL=${LABEL:-io.github.bagilov.clamshell.timer}
 INTERVAL=${INTERVAL:-20}
 FLOOR=${FLOOR:-0}
 DEADLINE=${DEADLINE:-0}
+# Post a notification when a session ends. Set to 0 to keep the watcher silent.
+NOTIFY=${NOTIFY:-1}
 # The watcher runs as the invoking user, so it cannot write the helper log in
 # /var/log; its own diagnostics go to the user's log directory instead.
 LOG=${LOG:-$HOME/Library/Logs/clamshell.log}
@@ -35,6 +38,18 @@ ATTEMPTS=0
 
 log_line() {
     printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOG" 2>/dev/null || true
+}
+
+# Post a user notification without blocking the watcher.
+#
+# The watcher runs unattended, so the only way a user learns a session ended —
+# or that a restore failed — is a notification. Any failure is swallowed: a
+# missing notification is a cosmetic loss, never a reason to skip the restore.
+notify() {
+    (( NOTIFY == 1 )) || return 0
+    local message=$1
+    "$OSASCRIPT" -e "display notification \"${message//\"/\\\"}\" \
+with title \"Clamshell\"" >/dev/null 2>&1 || true
 }
 
 percent_now() {
@@ -113,17 +128,23 @@ blank_display_for_lid() {
 # Restore sleep and clean up.
 #
 # On success the state file and this job are removed, so the session is really
-# over. On failure nothing is cleared: the pending trigger has to stay visible
-# (and retryable) rather than leave sleep disabled with no trace, which would
-# let the battery drain to zero unnoticed.
+# over, and a notification tells the user sleep is back on. On failure nothing
+# is cleared: the pending trigger has to stay visible (and retryable) rather
+# than leave sleep disabled with no trace, which would let the battery drain to
+# zero unnoticed.
+#
+# Args:
+#   $1: Human-readable reason the session ended, used in the notification.
 #
 # Returns: 0 when sleep was restored and cleaned up, 1 otherwise.
 restore_sleep() {
+    local reason=${1:-"the timer finished"}
     if ! sudo -n "$HELPER" off 2>/dev/null; then
         ATTEMPTS=$((ATTEMPTS + 1))
         log_line "failed to restore sleep (attempt $ATTEMPTS/$MAX_ATTEMPTS)"
         if (( ATTEMPTS >= MAX_ATTEMPTS )); then
             log_line "giving up after $ATTEMPTS attempts; state kept for 'clamshell off'"
+            notify "Could not restore sleep; run \`clamshell off\`."
             return 1
         fi
         return 2
@@ -131,7 +152,20 @@ restore_sleep() {
     [[ -n "${STATE:-}" ]] && rm -f "$STATE"
     launchctl remove "$LABEL" 2>/dev/null || true
     log_line "sleep restored"
+    notify "Sleep restored: ${reason}."
     return 0
+}
+
+# Why the session is ending, for the notification text. The floor is checked
+# when a floor is configured; otherwise the deadline is the only trigger.
+end_reason() {
+    if floor_hit; then
+        local percent
+        percent=$(percent_now)
+        printf 'battery reached %s%%' "${percent:-the floor}"
+    else
+        printf 'the timer finished'
+    fi
 }
 
 main() {
@@ -142,7 +176,7 @@ main() {
     while true; do
         if deadline_hit || floor_hit; then
             outcome=0
-            restore_sleep || outcome=$?
+            restore_sleep "$(end_reason)" || outcome=$?
             if (( outcome == 0 )); then
                 exit 0
             fi

@@ -322,6 +322,18 @@ public struct ClamshellCommand: Sendable {
         _ = try run(["darken"])
     }
 
+    /// Remove the helper, sudoers rule, launcher and installed sources.
+    ///
+    /// This is the one destructive call the app makes, so it only runs after an
+    /// explicit confirmation. It needs one administrator approval, which the CLI
+    /// raises itself through its own GUI prompt.
+    ///
+    /// - Returns: The textual confirmation printed by the CLI.
+    /// - Throws: `ClamshellError` when the CLI is missing or the removal fails.
+    public func uninstall() throws -> String {
+        try run(["uninstall"])
+    }
+
     private func joined(_ arguments: [String]) -> String {
         (["clamshell"] + arguments).joined(separator: " ")
     }
