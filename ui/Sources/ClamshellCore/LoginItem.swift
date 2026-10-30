@@ -81,11 +81,11 @@ public struct LoginItem: Sendable {
     public static func mapStatus(_ status: SMAppService.Status) -> Bool {
         switch status {
         case .enabled, .requiresApproval:
-            return true
+            true
         case .notRegistered, .notFound:
-            return false
+            false
         @unknown default:
-            return false
+            false
         }
     }
 }
