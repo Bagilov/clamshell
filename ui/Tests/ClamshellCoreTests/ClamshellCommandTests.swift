@@ -2,7 +2,10 @@ import ClamshellCore
 import Foundation
 import Testing
 
-@Suite("ClamshellCommand")
+/// Serialized: every test here spawns a child process and waits on a timeout, so
+/// running them in parallel makes each one compete for the same CPU budget and
+/// pushes the timing assertions over their bounds on a loaded CI runner.
+@Suite("ClamshellCommand", .serialized)
 struct ClamshellCommandTests {
     @Test("Prefers the user-owned launcher when present")
     func resolveLauncherPrefersLocal() {
@@ -68,13 +71,23 @@ struct ClamshellCommandTests {
         #expect(output.count == 4000 * 36)
     }
 
+    /// Seconds a hung-child test allows before the run must give up.
+    ///
+    /// The run's own timeout is this minus the terminate grace, and the margin
+    /// absorbs a loaded CI runner: a 1s budget was flaky whenever several of
+    /// these spawned children competed for the same CPU.
+    private static let hungTimeout: TimeInterval = 3
+
     @Test("Times out and returns when the child never exits")
     func timesOutOnHungChild() throws {
+        // `exec` replaces the shell with `sleep`, so the process the parent
+        // signalled is the one that exits: no shell wrapper lingers to hold the
+        // pipes open.
         let script = try makeScript("""
         #!/bin/sh
-        sleep 600
+        exec sleep 600
         """)
-        let command = ClamshellCommand(path: script.path, timeout: 1)
+        let command = ClamshellCommand(path: script.path, timeout: Self.hungTimeout)
         let start = Date()
         do {
             _ = try command.run([])
@@ -82,10 +95,10 @@ struct ClamshellCommandTests {
         } catch let error as ClamshellError {
             #expect(error == ClamshellError.commandFailed(
                 command: "clamshell",
-                detail: "timed out after 1s"
+                detail: "timed out after \(Int(Self.hungTimeout))s"
             ))
         }
-        #expect(Date().timeIntervalSince(start) < 10)
+        #expect(Date().timeIntervalSince(start) < Self.hungTimeout + 20)
     }
 
     @Test("Times out even when a descendant keeps the pipe open")
@@ -96,9 +109,9 @@ struct ClamshellCommandTests {
         let script = try makeScript("""
         #!/bin/sh
         sh -c 'trap "" TERM; sleep 600' &
-        sleep 600
+        exec sleep 600
         """)
-        let command = ClamshellCommand(path: script.path, timeout: 1)
+        let command = ClamshellCommand(path: script.path, timeout: Self.hungTimeout)
         let start = Date()
         do {
             _ = try command.run([])
@@ -106,10 +119,10 @@ struct ClamshellCommandTests {
         } catch let error as ClamshellError {
             #expect(error == ClamshellError.commandFailed(
                 command: "clamshell",
-                detail: "timed out after 1s"
+                detail: "timed out after \(Int(Self.hungTimeout))s"
             ))
         }
-        #expect(Date().timeIntervalSince(start) < 30)
+        #expect(Date().timeIntervalSince(start) < Self.hungTimeout + 30)
     }
 
     @Test("Keeps the child's stderr in the timeout message")
@@ -119,15 +132,15 @@ struct ClamshellCommandTests {
         let script = try makeScript("""
         #!/bin/sh
         echo 'Traceback: something exploded' >&2
-        sleep 600
+        exec sleep 600
         """)
-        let command = ClamshellCommand(path: script.path, timeout: 1)
+        let command = ClamshellCommand(path: script.path, timeout: Self.hungTimeout)
         do {
             _ = try command.run([])
             Issue.record("expected the run to time out")
         } catch let error as ClamshellError {
             let detail = "\(error)"
-            #expect(detail.contains("timed out after 1s"))
+            #expect(detail.contains("timed out after \(Int(Self.hungTimeout))s"))
             #expect(detail.contains("Traceback: something exploded"))
         }
     }
@@ -139,9 +152,9 @@ struct ClamshellCommandTests {
         let script = try makeScript("""
         #!/bin/sh
         head -c 200000 /dev/zero | tr '\\0' 'x' >&2
-        sleep 600
+        exec sleep 600
         """)
-        let command = ClamshellCommand(path: script.path, timeout: 1)
+        let command = ClamshellCommand(path: script.path, timeout: Self.hungTimeout)
         do {
             _ = try command.run([])
             Issue.record("expected the run to time out")

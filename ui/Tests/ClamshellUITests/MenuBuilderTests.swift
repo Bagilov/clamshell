@@ -7,15 +7,35 @@ import Testing
 @MainActor
 @Suite("MenuBuilder")
 struct MenuBuilderTests {
+    /// A command whose launcher exists, so the menu builds the full session set.
+    ///
+    /// The menu only offers the keep-awake choices when the CLI is installed, so
+    /// pointing at the real `/usr/local/bin/clamshell` would make every assertion
+    /// depend on the machine having clamshell installed. A throwaway executable
+    /// keeps the tests hermetic: they pass on a bare CI runner and on a developer
+    /// machine alike.
+    private func installedCommand() throws -> ClamshellCommand {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("clamshell-menu-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let script = dir.appendingPathComponent("clamshell")
+        try "#!/bin/sh\nexit 0\n".write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: script.path
+        )
+        return ClamshellCommand(path: script.path, timeout: 1)
+    }
+
     @Test("Rebuilding the menu twice does not reuse a menu item")
-    func rebuildingDoesNotReuseItems() {
+    func rebuildingDoesNotReuseItems() throws {
         // `NSMenuItem` can belong to a single menu; adding a stored instance to a
         // second menu throws NSInternalInconsistencyException ("Item to be
         // inserted into menu already is in another menu"). The old menu stays
         // installed until the new one is assigned, which is exactly the shape of
         // MenuBarController.rebuildMenu().
         var builder = MenuBuilder()
-        let command = ClamshellCommand(path: "/usr/local/bin/clamshell", timeout: 1)
+        let command = try installedCommand()
         final class Holder {
             var menu: NSMenu?
         }
@@ -43,9 +63,9 @@ struct MenuBuilderTests {
     }
 
     @Test("Checks the selected duration and clears it for a custom span")
-    func marksSelectedDuration() {
+    func marksSelectedDuration() throws {
         var builder = MenuBuilder()
-        let command = ClamshellCommand(path: "/usr/local/bin/clamshell", timeout: 1)
+        let command = try installedCommand()
 
         _ = builder.buildMenu(
             target: NSObject(),
@@ -70,9 +90,9 @@ struct MenuBuilderTests {
     }
 
     @Test("Does not accumulate duration items across rebuilds")
-    func rebuildReplacesDurationItems() {
+    func rebuildReplacesDurationItems() throws {
         var builder = MenuBuilder()
-        let command = ClamshellCommand(path: "/usr/local/bin/clamshell", timeout: 1)
+        let command = try installedCommand()
         let expected = DurationOption.allCases.count
 
         for _ in 0 ..< 3 {
@@ -109,9 +129,9 @@ struct MenuBuilderTests {
     }
 
     @Test("Adds an install row only when a release is known")
-    func updateRowOnlyWhenAvailable() {
+    func updateRowOnlyWhenAvailable() throws {
         var builder = MenuBuilder()
-        let command = ClamshellCommand(path: "/usr/local/bin/clamshell", timeout: 1)
+        let command = try installedCommand()
 
         // The menu is held for the duration of each assertion: an NSMenu that is
         // released takes its items' `menu` back-reference with it.
@@ -138,9 +158,9 @@ struct MenuBuilderTests {
     }
 
     @Test("Always adds a manual check row, even on a failed check")
-    func checkRowAlwaysPresent() {
+    func checkRowAlwaysPresent() throws {
         var builder = MenuBuilder()
-        let command = ClamshellCommand(path: "/usr/local/bin/clamshell", timeout: 1)
+        let command = try installedCommand()
         let menu = builder.buildMenu(
             target: NSObject(),
             command: command,
@@ -154,9 +174,9 @@ struct MenuBuilderTests {
     }
 
     @Test("Shows the login row only when the app can register it")
-    func loginRowOnlyWhenAvailable() {
+    func loginRowOnlyWhenAvailable() throws {
         var builder = MenuBuilder()
-        let command = ClamshellCommand(path: "/usr/local/bin/clamshell", timeout: 1)
+        let command = try installedCommand()
 
         let available = builder.buildMenu(
             target: NSObject(),
@@ -185,9 +205,9 @@ struct MenuBuilderTests {
     }
 
     @Test("Offers an uninstall row that opens a confirmation")
-    func uninstallRowPresent() {
+    func uninstallRowPresent() throws {
         var builder = MenuBuilder()
-        let command = ClamshellCommand(path: "/usr/local/bin/clamshell", timeout: 1)
+        let command = try installedCommand()
         let menu = builder.buildMenu(
             target: NSObject(),
             command: command,
