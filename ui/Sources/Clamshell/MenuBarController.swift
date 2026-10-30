@@ -7,7 +7,8 @@ import ClamshellCore
 /// the main queue so AppKit state stays single-threaded.
 @MainActor
 final class MenuBarController: NSObject, MenuActions {
-    private let command = ClamshellCommand()
+    /// The CLI wrapper. Internal so the update extension can drive it.
+    let command = ClamshellCommand()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private var refreshTimer: Timer?
     private var tickTimer: Timer?
@@ -18,11 +19,16 @@ final class MenuBarController: NSObject, MenuActions {
     private var customSpan: String?
     private var darkenDisplay = false
     private var lastError: Error?
-    private var isWorking = false
+    /// Internal so the update extension can share the busy guard.
+    var isWorking = false
     private var awaitingExpiryRefresh = false
 
     /// Last choices, restored on the next launch so they are not re-picked.
     private let preferences = Preferences()
+
+    /// Periodic, silent release check; installing always needs user consent.
+    /// Internal so the update extension can drive and read the checker.
+    lazy var updates = UpdateChecker(command: command)
 
     private var menuBuilder = MenuBuilder()
     private var activity: NSObjectProtocol?
@@ -34,6 +40,7 @@ final class MenuBarController: NSObject, MenuActions {
         render()
         refresh()
         reconcileAfterRestart()
+        startUpdateChecks()
         // App Nap throttles timers in a background accessory app, so opt out of
         // napping via AppNapPolicy, which deliberately does not block sleep.
         activity = ProcessInfo.processInfo.beginActivity(
@@ -97,13 +104,22 @@ final class MenuBarController: NSObject, MenuActions {
         RestartReconciler(command: command).run()
     }
 
+    /// Start the silent periodic update check and refresh the menu on results.
+    private func startUpdateChecks() {
+        updates.onChange = { [weak self] in
+            self?.rebuildMenu()
+        }
+        updates.start()
+    }
+
     private func buildMenu() {
         let menu = menuBuilder.buildMenu(
             target: self,
             command: command,
             floor: batteryFloor,
             duration: customSpan == nil ? selectedDuration : nil,
-            darken: darkenDisplay
+            darken: darkenDisplay,
+            update: updates.status
         )
         statusItem.menu = menu
         let observer = MenuOpenObserver { [weak self] in
@@ -263,7 +279,11 @@ extension MenuBarController {
     @objc func quit() {
         NSApplication.shared.terminate(nil)
     }
+}
 
+/// Menu action plumbing: session control and CLI mutation.
+@MainActor
+extension MenuBarController {
     /// Run a CLI mutation, then refresh the displayed state.
     private func perform(_ action: @escaping () throws -> Void) {
         guard !isWorking else { return }
@@ -285,7 +305,8 @@ extension MenuBarController {
     ///
     /// The remaining time is converted into a local deadline so the countdown
     /// can tick every second without querying the CLI that often.
-    private func refreshStatus() async {
+    /// Internal so the update extension can refresh after an install.
+    func refreshStatus() async {
         guard command.isInstalled else {
             lastError = ClamshellError.cliNotFound(command.launcherPath)
             return
@@ -318,7 +339,8 @@ extension MenuBarController {
         markFloorSelection()
     }
 
-    private func renderBusy() {
+    /// Internal so the update extension can show a working state.
+    func renderBusy() {
         apply(.busy)
     }
 
@@ -329,7 +351,8 @@ extension MenuBarController {
         return max(0, seconds)
     }
 
-    private func render() {
+    /// Internal so the update extension can re-render after an install.
+    func render() {
         resolveLocalExpiry()
         apply(MenuBarPresentation.make(
             status: status,

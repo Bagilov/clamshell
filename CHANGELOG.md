@@ -10,6 +10,33 @@ releases, and breaking changes are noted explicitly.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-30
+
+### Added
+
+- `clamshell update` checks GitHub Releases for a newer version, and
+  `clamshell update --install` downloads, verifies and installs it. The check is
+  throttled to once a day (`--force` overrides), and the result is available as
+  JSON with `--json` for the menu bar app.
+- The menu bar app checks for updates in the background and offers **Update
+  to X.Y.Z…** when one is available, next to an always-present **Check for
+  Updates…** row. Installing always asks for confirmation first, and the app
+  offers to restart once the new version is in place.
+- The installer is verified against the release's `sha256` digest before it is
+  installed. A release without a digest is refused unless
+  `--allow-unverified` is passed, so the default path never installs unverified
+  code. `--dry-run` downloads and verifies without installing.
+- An active keep-awake session is re-armed on the new version after an upgrade,
+  so the new watcher takes over without restoring sleep. The updated sources are
+  also copied into the user-owned support directory, which the menu bar app reads.
+
+### Changed
+
+- Release selection prefers a final release over a pre-release and only ever
+  offers something strictly newer than the running version. With this project's
+  releases currently all marked as pre-releases, the newest pre-release is
+  offered instead, so updates still work either way.
+
 ## [0.3.0] - 2026-10-28
 
 ### Added
@@ -128,7 +155,8 @@ not yet frozen.
   display toggle and surfaced CLI errors.
 - `--version`, and bundle/version consistency checks.
 
-[Unreleased]: https://github.com/Bagilov/clamshell/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Bagilov/clamshell/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Bagilov/clamshell/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Bagilov/clamshell/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Bagilov/clamshell/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Bagilov/clamshell/compare/v0.1.0...v0.1.1

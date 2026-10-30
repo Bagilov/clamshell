@@ -86,4 +86,70 @@ struct MenuBuilderTests {
         }
         #expect(builder.durationItems.count == expected)
     }
+
+    private func updateStatus(release: Bool) -> UpdateStatus {
+        let info = release
+            ? ReleaseInfo(
+                version: "0.4.0",
+                tag: "v0.4.0",
+                name: "Clamshell 0.4.0",
+                isPrerelease: false,
+                pageURL: "https://example.test/v0.4.0",
+                assetName: "Clamshell-0.4.0.pkg",
+                hasDigest: true
+            )
+            : nil
+        return UpdateStatus(
+            current: "0.3.0",
+            latest: info?.version,
+            release: info,
+            checkedAt: 0,
+            fromCache: false
+        )
+    }
+
+    @Test("Adds an install row only when a release is known")
+    func updateRowOnlyWhenAvailable() {
+        var builder = MenuBuilder()
+        let command = ClamshellCommand(path: "/usr/local/bin/clamshell", timeout: 1)
+
+        // The menu is held for the duration of each assertion: an NSMenu that is
+        // released takes its items' `menu` back-reference with it.
+        let withUpdate = builder.buildMenu(
+            target: NSObject(),
+            command: command,
+            floor: .off,
+            duration: .indefinite,
+            darken: false,
+            update: updateStatus(release: true)
+        )
+        #expect(builder.updateItem.title == "Update to 0.4.0…")
+        #expect(builder.updateItem.menu === withUpdate)
+
+        let withoutUpdate = builder.buildMenu(
+            target: NSObject(),
+            command: command,
+            floor: .off,
+            duration: .indefinite,
+            darken: false,
+            update: updateStatus(release: false)
+        )
+        #expect(withoutUpdate.items.contains(builder.updateItem) == false)
+    }
+
+    @Test("Always adds a manual check row, even on a failed check")
+    func checkRowAlwaysPresent() {
+        var builder = MenuBuilder()
+        let command = ClamshellCommand(path: "/usr/local/bin/clamshell", timeout: 1)
+        let menu = builder.buildMenu(
+            target: NSObject(),
+            command: command,
+            floor: .off,
+            duration: .indefinite,
+            darken: false,
+            update: updateStatus(release: false)
+        )
+        #expect(builder.checkUpdatesItem.menu === menu)
+        #expect(builder.checkUpdatesItem.title == "Check for Updates…")
+    }
 }

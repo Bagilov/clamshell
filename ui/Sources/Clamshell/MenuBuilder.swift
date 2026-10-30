@@ -19,6 +19,10 @@ struct MenuBuilder {
     private(set) var floorItems: [NSMenuItem] = []
     /// The toggle that blanks the display when a session starts.
     private(set) var darkenItem = NSMenuItem()
+    /// The "install the newer release" row, shown only when one is known.
+    private(set) var updateItem = NSMenuItem()
+    /// The always-present manual check row.
+    private(set) var checkUpdatesItem = NSMenuItem()
 
     /// Assemble the full status menu.
     ///
@@ -28,13 +32,15 @@ struct MenuBuilder {
     ///   - floor: Currently selected battery floor, for the radio state.
     ///   - duration: Preset to check, or `nil` when a custom span is running.
     ///   - darken: Whether the display toggle is currently on.
+    ///   - update: Known update status, used to show the install row.
     /// - Returns: The assembled menu.
     mutating func buildMenu(
         target: AnyObject,
         command: ClamshellCommand,
         floor: BatteryFloor,
         duration: DurationOption?,
-        darken: Bool
+        darken: Bool,
+        update: UpdateStatus? = nil
     ) -> NSMenu {
         let menu = NSMenu()
         stateItem = NSMenuItem()
@@ -47,6 +53,8 @@ struct MenuBuilder {
         addFloorItems(to: menu, target: target, floor: floor)
         menu.addItem(.separator())
         addDisplayItem(to: menu, target: target, darken: darken)
+        menu.addItem(.separator())
+        addUpdateItems(to: menu, target: target, update: update)
         menu.addItem(.separator())
         addCommandItems(to: menu, target: target)
         return menu
@@ -141,6 +149,37 @@ struct MenuBuilder {
         menu.addItem(darkenItem)
     }
 
+    /// The update rows: install a known release, or check by hand.
+    ///
+    /// The install row is only added when a newer release is known, so the menu
+    /// never shows a dead entry. The check row is always present, because a
+    /// failed or stale check is exactly when a user wants to retry.
+    private mutating func addUpdateItems(
+        to menu: NSMenu,
+        target: AnyObject,
+        update: UpdateStatus?
+    ) {
+        if let title = UpdatePresentation.updateTitle(for: update) {
+            updateItem = NSMenuItem(
+                title: title,
+                action: #selector(MenuActions.installUpdate),
+                keyEquivalent: ""
+            )
+            updateItem.target = target
+            menu.addItem(updateItem)
+        } else {
+            updateItem = NSMenuItem()
+        }
+
+        checkUpdatesItem = NSMenuItem(
+            title: UpdatePresentation.checkTitle(for: update),
+            action: #selector(MenuActions.checkForUpdates),
+            keyEquivalent: ""
+        )
+        checkUpdatesItem.target = target
+        menu.addItem(checkUpdatesItem)
+    }
+
     /// Stop, refresh and quit.
     private func addCommandItems(to menu: NSMenu, target: AnyObject) {
         let offItem = NSMenuItem(
@@ -228,6 +267,8 @@ protocol MenuActions {
     func toggleDarken()
     func stopSession()
     func refresh()
+    func installUpdate()
+    func checkForUpdates()
     func showAbout()
     func openRepository()
     func quit()

@@ -213,6 +213,39 @@ public struct ClamshellCommand: Sendable {
         _ = try run(["reconcile"])
     }
 
+    /// Check for a newer release without installing anything.
+    ///
+    /// The CLI throttles the request to once a day unless `force` is set, so a
+    /// periodic call is cheap. A failed check is not an error: the decoded
+    /// status carries the reason and the rest of the app keeps working.
+    ///
+    /// - Parameter force: Bypass the throttle and query the network now.
+    /// - Returns: The decoded update status.
+    /// - Throws: `ClamshellError` when the CLI is missing or returns unusable output.
+    public func updateStatus(force: Bool = false) throws -> UpdateStatus {
+        var arguments = ["update", "--json"]
+        if force {
+            arguments.append("--force")
+        }
+        let output = try run(arguments)
+        guard let data = output.data(using: .utf8) else {
+            throw ClamshellError.commandFailed(command: "update", detail: "unreadable output")
+        }
+        return try JSONDecoder().decode(UpdateStatus.self, from: data)
+    }
+
+    /// Install the release the last check found.
+    ///
+    /// The CLI downloads the installer, verifies its checksum and asks for one
+    /// administrator approval. This is the only call that changes the system, so
+    /// the app only makes it after an explicit user confirmation.
+    ///
+    /// - Returns: The textual confirmation printed by the CLI.
+    /// - Throws: `ClamshellError` when the download, verification or install fails.
+    public func installUpdate() throws -> String {
+        try run(["update", "--install"])
+    }
+
     /// Disable sleep, optionally scheduling automatic restore triggers.
     ///
     /// - Parameters:
@@ -316,76 +349,5 @@ public struct ClamshellCommand: Sendable {
             capture.stop()
         }
         _ = readers.wait(timeout: .now() + terminateGrace)
-    }
-}
-
-/// Drains one pipe to EOF on a background queue.
-///
-/// Keeping the reader off the caller's thread is what makes large output safe:
-/// the child never blocks on a full pipe buffer while the parent waits for exit.
-///
-/// Reading uses `poll` with a short timeout instead of a blocking read, so
-/// `stop()` can end the loop even when a surviving descendant still holds the
-/// write end open and EOF never arrives.
-private final class PipeCapture: @unchecked Sendable {
-    /// How long `poll` blocks before the stop flag is checked again.
-    private static let pollInterval: Int32 = 200
-
-    private let descriptor: Int32
-    private let lock = NSLock()
-    private var data = Data()
-    private var stopped = false
-
-    init(_ pipe: Pipe) {
-        descriptor = pipe.fileHandleForReading.fileDescriptor
-    }
-
-    /// Read until the write end closes or `stop()` is called.
-    func drain() {
-        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-        while !isStopped {
-            var target = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
-            let ready = poll(&target, 1, Self.pollInterval)
-            if ready < 0 {
-                if errno == EINTR {
-                    continue
-                }
-                return
-            }
-            if ready == 0 {
-                continue
-            }
-            let count = read(descriptor, &buffer, buffer.count)
-            if count > 0 {
-                lock.lock()
-                data.append(contentsOf: buffer[0 ..< count])
-                lock.unlock()
-            } else if count == 0 {
-                return
-            } else if errno != EAGAIN, errno != EINTR {
-                return
-            }
-        }
-    }
-
-    /// Ask `drain()` to return without waiting for EOF.
-    func stop() {
-        lock.lock()
-        stopped = true
-        lock.unlock()
-    }
-
-    private var isStopped: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return stopped
-    }
-
-    /// Captured output, trimmed of surrounding whitespace and newlines.
-    var text: String {
-        lock.lock()
-        defer { lock.unlock() }
-        let decoded = String(bytes: data, encoding: .utf8) ?? ""
-        return decoded.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import clamshell_core as core
+import clamshell_update as update
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +27,11 @@ def isolate_user_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr(core, "SUPPORT_DIR", tmp_path / "support")
     monkeypatch.setattr(core, "STATE_PATH", tmp_path / "support" / "state.plist")
+    # The update cache lives under the same support directory. Patch it through
+    # the update module, which owns the reference, so a test that forgets its own
+    # patch cannot read or overwrite the developer's real cache.
+    cache = tmp_path / "support" / "update-check.json"
+    monkeypatch.setattr(update, "CACHE_PATH", cache)
 
 
 @pytest.fixture(autouse=True)

@@ -9,6 +9,7 @@ Commands:
     off                         Restore normal sleep behaviour.
     status                      Show the current state and pending triggers.
     battery                     Show battery level and the configured floor.
+    update [--install]          Check for or install a newer release.
 """
 
 from __future__ import annotations
@@ -50,6 +51,7 @@ from clamshell_privileged import (
     install_privileged,
     uninstall_command,
 )
+from clamshell_update_cli import add_update_parser
 
 
 def cmd_on(args: argparse.Namespace) -> int:
@@ -297,6 +299,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     darken = sub.add_parser("darken", help="turn the display off now")
     darken.set_defaults(func=cmd_darken)
+
+    add_update_parser(sub)
 
     install = sub.add_parser("install", help="install helper and sudoers rule")
     install.set_defaults(func=cmd_install)

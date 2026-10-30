@@ -48,6 +48,46 @@ enum Prompt {
         warn(title: title, message: message)
     }
 
+    /// Ask the user to confirm installing an update.
+    ///
+    /// Installing is the one action that changes the system, so it always goes
+    /// through an explicit confirmation. The default button is "Install" and
+    /// "Cancel" is offered, so the safe choice is one keystroke away.
+    ///
+    /// - Parameters:
+    ///   - version: Version the update would install.
+    ///   - message: Body text describing what will happen.
+    /// - Returns: `true` when the user chose to install.
+    static func confirmUpdate(version: String, message: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Install Clamshell \(version)?"
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Install")
+        alert.addButton(withTitle: "Cancel")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    /// Report a successful update and offer to relaunch.
+    ///
+    /// The installed binaries changed on disk while the old process is still
+    /// running, so restarting is what actually puts the new version in use.
+    ///
+    /// - Returns: `true` when the user chose to restart now.
+    static func offerRelaunch(version: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Clamshell \(version) installed"
+        alert.informativeText =
+            "Restart Clamshell to start using the new version? "
+                + "Any keep-awake session keeps running either way."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Restart Now")
+        alert.addButton(withTitle: "Later")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     /// Report a failure from a background action, such as a CLI error.
     ///
     /// Activating first matters for an accessory app: with no key window the

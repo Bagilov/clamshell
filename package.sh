@@ -47,6 +47,10 @@ install -m 644 \
     "$REPO_DIR/clamshell_battery.py" \
     "$REPO_DIR/clamshell_cli.py" \
     "$REPO_DIR/clamshell_privileged.py" \
+    "$REPO_DIR/clamshell_release.py" \
+    "$REPO_DIR/clamshell_update.py" \
+    "$REPO_DIR/clamshell_update_cli.py" \
+    "$REPO_DIR/clamshell_upgrade.py" \
     "$PAYLOAD/usr/local/lib/clamshell/"
 install -m 755 "$REPO_DIR/clamshell_timer.sh" "$PAYLOAD/usr/local/lib/clamshell/"
 install -m 755 "$REPO_DIR/clamshell_helper.sh" "$PAYLOAD/usr/local/lib/clamshell/"
